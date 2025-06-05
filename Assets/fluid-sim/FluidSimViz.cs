@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.Profiling;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public enum VisualizationMode
 {
@@ -13,6 +14,7 @@ public enum VisualizationMode
 public class FluidSimViz : MonoBehaviour
 {
     static readonly int k_ParticlePositions = Shader.PropertyToID("ParticlePositions");
+    public float m_ScalingFactor = 1.0f;
     public Texture2D m_CircleTexture;
     public Material m_CircleMaterial;
     public Material m_FluidMaterialDebugViz;
@@ -130,10 +132,17 @@ public class FluidSimViz : MonoBehaviour
         {
             m_PointDensitiesData[index] = densities[index];
         }
+        
         var pressure = m_FluidSim.GetPressures();
+        var maxPressure = pressure[0];
+        var minPressure = pressure[1];
         for (var index = 0; index < m_FluidSim.m_ParticleCount; index++)
         {
             m_PointPressureData[index] = pressure[index];
+            if(m_PointPressureData[index] > maxPressure)
+                maxPressure = m_PointPressureData[index];
+            if (m_PointPressureData[index] < minPressure)
+                minPressure = m_PointPressureData[index];
         }
         
         m_PointBuffer.SetData(m_PointPositionData);
@@ -143,7 +152,9 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetBuffer("_particle_densities", m_PointDensitiesBuffer);
         m_FluidMaterialDebugViz.SetBuffer("_particle_pressures", m_PointPressureBuffer);
         m_FluidMaterialDebugViz.SetInt("_PointCount", m_FluidSim.m_ParticleCount);
-        
+
+        m_FluidMaterialDebugViz.SetFloat("_scaling_factor", m_ScalingFactor);
+
         m_FluidMaterialDebugViz.SetFloat("_sizex", m_FluidSim.width);
         m_FluidMaterialDebugViz.SetFloat("_sizey", m_FluidSim.height);
         m_FluidMaterialDebugViz.SetFloat("_mousex", m_MousePos.x);
@@ -155,6 +166,8 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetColor("_negativePressureColor", m_NegativePressureColor);
         m_FluidMaterialDebugViz.SetColor("_neutralPressureColor", m_NeutralPressureColor);
         m_FluidMaterialDebugViz.SetColor("_positivePressureColor", m_PositivePressureColor);
+        m_FluidMaterialDebugViz.SetFloat("_max_pressure", maxPressure);
+        m_FluidMaterialDebugViz.SetFloat("_min_pressure", minPressure);
         
 
 
@@ -182,14 +195,14 @@ public class FluidSimViz : MonoBehaviour
         
         
         
-        DrawMaterial(new Rect(0,0, m_FluidSim.width, m_FluidSim.height), m_FluidMaterialDebugViz);
+        DrawMaterial(new Rect(0,0, m_FluidSim.width * m_ScalingFactor, m_FluidSim.height * m_ScalingFactor), m_FluidMaterialDebugViz);
 
         if (!m_ShowOverlay) return;
         var thickness = 1;
         var topleft = new Vector2(0, 0);
-        var topright = new Vector2(0, m_FluidSim.height);
-        var bottomleft = new Vector2(m_FluidSim.width, 0);
-        var bottomright = new Vector2(m_FluidSim.width, m_FluidSim.height);
+        var topright = new Vector2(0, m_FluidSim.height * m_ScalingFactor);
+        var bottomleft = new Vector2(m_FluidSim.width*m_ScalingFactor, 0);
+        var bottomright = new Vector2(m_FluidSim.width*m_ScalingFactor, m_FluidSim.height*m_ScalingFactor);
         
         //Graphics.DrawTexture(new Rect(0,0, m_FluidSim.width, m_FluidSim.height), m_Texture);
 
@@ -202,8 +215,8 @@ public class FluidSimViz : MonoBehaviour
         var positions = m_FluidSim.GetPositions();
         for (var i = 0; i < m_FluidSim.m_ParticleCount; i++)
         {
-            var position = positions[i];
-            DrawCircle(position, m_CircleSize, Color.blue);
+            var position = positions[i] * m_ScalingFactor;
+            DrawCircle(position, m_CircleSize * m_ScalingFactor, Color.blue);
         }
         
     }

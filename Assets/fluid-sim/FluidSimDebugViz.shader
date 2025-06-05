@@ -28,6 +28,7 @@ Shader "Unlit/FluidSimDebugViz"
     StructuredBuffer<float> _particle_densities;
     StructuredBuffer<float> _particle_pressures;
     int _PointCount;
+    float _scaling_factor;
     float _sizex;
     float _sizey;
     float _mousex;
@@ -36,6 +37,8 @@ Shader "Unlit/FluidSimDebugViz"
     float _DensityVizFactor;
     float _circleSize;
     int _visMode;
+    float _min_pressure;
+    float _max_pressure;
     float4 _negativePressureColor;
     float4 _neutralPressureColor;
     float4 _positivePressureColor;
@@ -107,13 +110,18 @@ Shader "Unlit/FluidSimDebugViz"
         return pressure;
     }
 
+    float inverseLerp(float min, float max, float val)
+    {
+        return (val - min) /  (max - min);
+    }
+
     fixed4 frag (v2f i) : SV_Target
     {
-        float2 size = float2(_sizex, _sizey);
-        float2 mouse = float2(_mousex, _mousey);
+        //float2 size = float2(_sizex, _sizey);
+        //float2 mouse = float2(_mousex, _mousey);
         float2 normalizedScreenCoord = (i.scrPos.xy / i.scrPos.w); // [0-1] in viewport
         float2 screenPixel = normalizedScreenCoord *  _ScreenParams.xy ;
-        float2 localPos = float2(screenPixel.x, _ScreenParams.y - screenPixel.y)  ;
+        float2 localPos = float2(screenPixel.x, _ScreenParams.y - screenPixel.y) / _scaling_factor;
         //fixed4 col = float4(1, frac(localPos / _ScreenParams.xy) , 1);
 
         fixed4 col;
@@ -122,21 +130,31 @@ Shader "Unlit/FluidSimDebugViz"
             col = float4(1,prop*_DensityVizFactor,0,1);
         } else if (_visMode == 1) {
             float prop = CalculatePressure(localPos);
+            
             if (prop < -10)
-                col = _negativePressureColor;
+            {
+                float t = inverseLerp(_min_pressure, -10, prop);
+                col = lerp(_negativePressureColor,_neutralPressureColor, t);
+            }
             else if (prop > 10)
-                col = _positivePressureColor;
+            {
+                float t = inverseLerp(10, _max_pressure, prop);
+                col = lerp(_neutralPressureColor,_positivePressureColor, t);
+                //col = _positivePressureColor;
+            }
             else
+            {
                 col = _neutralPressureColor;
+            }
         }
 
         
 
-        float2 pos = mouse;
-        if (distance(pos, localPos) <100)
-        {
-            col.b = 1;
-        }
+        // float2 pos = mouse;
+        // if (distance(pos, localPos) <100)
+        // {
+        //     col.b = 1;
+        // }
         
 
         for (int i = 0; i < _PointCount; i++)

@@ -8,15 +8,6 @@ using Unity.Profiling;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
-[Serializable]
-public struct Particle //probably an Struct of arrays could be beneficial
-{
-    public Vector2 position;
-    public float density;
-    public float pressure;
-    public Vector2 velocity;
-}
-
 public class FluidSim : MonoBehaviour
 {
     public int m_ParticleCount;
