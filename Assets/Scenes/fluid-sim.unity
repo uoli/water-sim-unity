@@ -657,11 +657,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 605d4fe371862ae4da086394dbdab1ad, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_ParticleCount: 500
-  width: 250
-  height: 250
+  m_ParticleCount: 1000
+  width: 533
+  height: 613
   Mass: 1
-  SmoothingLength: 10
+  SmoothingLength: 33.23167
+  SimulationStep: 0.0001
 --- !u!4 &2014640970
 Transform:
   m_ObjectHideFlags: 0

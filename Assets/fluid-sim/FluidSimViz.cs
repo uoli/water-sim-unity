@@ -42,17 +42,43 @@ public class FluidSimViz : MonoBehaviour
     void Start()
     {
         m_FluidSim = GetComponent<FluidSim>();
-        InitTexture();
+        InitTexture(); 
         m_Mesh = new Mesh();
         m_Mesh.SetVertices(new Vector3[]{new (0, 0), new (0, -1), new (1, -1), new (1, 0)});
         m_Mesh.SetIndices(new int[]{0, 2, 1, 0, 3, 2}, MeshTopology.Triangles, 0);
     }
 
+    void OnDisable()
+    {
+        CleanupComputeBuffers();  
+    }
+
+    void OnDestroy()
+    {
+        CleanupTexture();
+        Destroy(m_Mesh);
+    }
+
+    void CleanupTexture()
+    {
+        if (m_Texture != null) 
+            Destroy(m_Texture);
+    }
+
     void InitTexture()
     {
-        if (m_Texture != null)
-            Destroy(m_Texture);
+        CleanupTexture();
         m_Texture = new Texture2D(m_FluidSim.width, m_FluidSim.height);
+    }
+
+    void CleanupComputeBuffers()
+    {
+        if (m_PointBuffer != null)
+            m_PointBuffer.Release();
+        if (m_PointDensitiesBuffer != null)
+            m_PointDensitiesBuffer.Release();
+        if (m_PointPressureBuffer != null)
+            m_PointPressureBuffer.Release();
     }
     
     // Update is called once per frame
@@ -82,12 +108,7 @@ public class FluidSimViz : MonoBehaviour
 
         if (m_PointBuffer == null || m_PointDensitiesBuffer.count != m_FluidSim.m_ParticleCount)
         {
-            if (m_PointBuffer != null)
-                m_PointBuffer.Release();
-            if (m_PointDensitiesBuffer != null)
-                m_PointDensitiesBuffer.Release();
-            if (m_PointPressureBuffer != null)
-                m_PointPressureBuffer.Release();
+            CleanupComputeBuffers();
 
             m_PointPositionData = new float[m_FluidSim.m_ParticleCount * 2];
             m_PointBuffer = new ComputeBuffer(m_PointPositionData.Length, sizeof(float));

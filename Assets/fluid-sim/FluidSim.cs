@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Profiling;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -26,10 +28,10 @@ public class FluidSim : MonoBehaviour
     [Range(0, 1)]
     public float SimulationStep = 0.0001f;
     
-    Vector2[] m_Position;
+    NativeArray<Vector2> m_Position;
     NativeArray<float> m_Density;
     NativeArray<float> m_Pressure;
-    Vector2[] m_Velocity;
+    NativeArray<Vector2> m_Velocity;
 
     float m_SquaredSmoothingLength;
     float m_KernelTerm;
@@ -41,10 +43,10 @@ public class FluidSim : MonoBehaviour
     static readonly ProfilerMarker s_PressurePerfMarker = new ProfilerMarker("FluidSim.PressureCalc");
     static readonly ProfilerMarker s_DensityPerfMarker = new ProfilerMarker("FluidSim.DensityeCalc");
 
-    public IReadOnlyList<Vector2> GetPositions() { return m_Position; }
-    public NativeArray<float>.ReadOnly GetDensities() { return m_Density.AsReadOnly(); }
-    public NativeArray<float>.ReadOnly GetPressures() { return m_Pressure.AsReadOnly(); }
-    public IReadOnlyList<Vector2> GetVelocities() { return m_Velocity; }
+    public ReadOnlySpan<Vector2> GetPositions() { return m_Position.AsReadOnlySpan(); }
+    public ReadOnlySpan<float> GetDensities() { return m_Density.AsReadOnlySpan(); }
+    public ReadOnlySpan<float> GetPressures() { return m_Pressure.AsReadOnlySpan(); }
+    public ReadOnlySpan<Vector2> GetVelocities() { return m_Velocity.AsReadOnlySpan(); }
     
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -52,12 +54,30 @@ public class FluidSim : MonoBehaviour
         InitParticles();
     }
 
+    void OnDisable()
+    {
+        CleanupParticles();
+    }
+
+    void CleanupParticles()
+    {
+        if (m_Position.IsCreated) 
+            m_Position.Dispose();
+        if (m_Density.IsCreated)
+            m_Density.Dispose();
+        if (m_Pressure.IsCreated)
+            m_Pressure.Dispose();
+        if (m_Velocity.IsCreated)
+            m_Velocity.Dispose();
+    }
+
     void InitParticles()
     {
-        m_Position = new Vector2[m_ParticleCount];
+        CleanupParticles();
+        m_Position = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
         m_Density = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
         m_Pressure = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
-        m_Velocity = new Vector2[m_ParticleCount];
+        m_Velocity = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
         for ( var i = 0; i < m_ParticleCount; i++ )
         {
             var position = new Vector2(Random.Range(0f, width), Random.Range(0f, height));
@@ -83,25 +103,20 @@ public class FluidSim : MonoBehaviour
         CalculateParticlePressure();
         SimulateStep(SimulationStep);
     }
-
-    void SimulateStep(float deltaTime)
+    
+    struct CalculatePositionFromVelocityJobFor : IJobFor
     {
-        using var markerScope = s_StepPerfMarker.Auto();
-
-        Parallel.For(0, m_ParticleCount, index =>
+        public NativeArray<Vector2> positions;
+        public float deltaTime;
+        public float width;
+        public float height;
+        
+        [ReadOnly]
+        public NativeArray<Vector2> velocities;
+        public void Execute(int index)
         {
-            var position = m_Position[index];
-            var density = m_Density[index];
-            var pressureForce = CalculatePressureGradient(position);
-            var pressureAcceleration = pressureForce / density;
-            var velocity = pressureAcceleration * deltaTime;
-            m_Velocity[index] += velocity;
-        });
-
-        Parallel.For(0, m_ParticleCount, index =>
-        {
-            var position = m_Position[index];
-            position += m_Velocity[index] * deltaTime;
+            var position = positions[index];
+            position += velocities[index] * deltaTime;
             if (position.x < 0)
                 position.x = 0;
             if (position.y < 0)
@@ -110,9 +125,66 @@ public class FluidSim : MonoBehaviour
                 position.x = width;
             if (position.y > height)
                 position.y = height;
-            m_Position[index] = position;
-        });
+            positions[index] = position;
+        }
+    }
+    
+    struct AccumulateVelocityFromPressureJobFor : IJobFor
+    {
+        [ReadOnly]
+        public NativeArray<Vector2> positions;
+        [ReadOnly]
+        public NativeArray<float> densities;
+        [ReadOnly]
+        public NativeArray<float> pressures;
+        
+        public NativeArray<Vector2> velocities;
+        public float mass;
+        public float squaredSmoothingLength;
+        public float kernelDerivativeTerm;
+        public float deltaTime;
+        public void Execute(int index)
+        {
+            var position = positions[index];
+            var density = densities[index]; 
+            var pressureForce = CalculatePressureGradient(position, mass, squaredSmoothingLength, kernelDerivativeTerm,
+                positions, pressures, densities);
+            var pressureAcceleration = pressureForce / density;
+            var velocity = pressureAcceleration * deltaTime;
+            velocities[index] += velocity;
+        }
+    }
 
+    void SimulateStep(float deltaTime)
+    {
+        using var markerScope = s_StepPerfMarker.Auto();
+        
+        JobHandle dependencyJobHandle = default;
+        var velocityFromPressureJob = new AccumulateVelocityFromPressureJobFor()
+        {
+            positions = m_Position,
+            densities = m_Density,
+            pressures = m_Pressure,
+            velocities = m_Velocity,
+            deltaTime = deltaTime,
+            mass = Mass,
+            squaredSmoothingLength = m_SquaredSmoothingLength,
+            kernelDerivativeTerm = m_KernelDerivativeTerm,
+        };
+        var velocityFromPressureJobHandle = velocityFromPressureJob.ScheduleParallelByRef(m_Position.Length,
+            64, dependencyJobHandle);
+        
+        var job = new CalculatePositionFromVelocityJobFor()
+        {
+            positions = m_Position,
+            deltaTime = deltaTime,
+            width = width,
+            height = height,
+            velocities = m_Velocity
+        };
+        var velocityJobHandle = job.ScheduleParallelByRef(m_Position.Length,
+            64, velocityFromPressureJobHandle);
+        velocityJobHandle.Complete();
     }
 
     public float CalcTargetDensity()
@@ -127,30 +199,65 @@ public class FluidSim : MonoBehaviour
         m_KernelDerivativeTerm = -24 / (Mathf.PI * Mathf.Pow(SmoothingLength, 8));
         m_TargetDensity = CalcTargetDensity();
     }
-    
+
     float CalculateDensity(Vector2 pos)
     {
+        return CalculateDensity(pos, Mass, m_SquaredSmoothingLength, m_KernelTerm, m_Position.AsReadOnlySpan());
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static float CalculateDensity(Vector2 pos, float mass, float squaredSmoothingLength, float kernelTerm, ReadOnlySpan<Vector2> positions)
+    {
         var density = 0f;
-        for (var i = 0; i < m_ParticleCount; i++)
+        for (var i = 0; i < positions.Length; i++)
         {
-            var position = m_Position[i];
+            var position = positions[i];
             var sqrDst = Vector2.SqrMagnitude(position - pos);
-            var influence = SmoothingKernel(sqrDst, SmoothingLength);
-            density += Mass * influence;
+            var influence = SmoothingKernel(sqrDst, squaredSmoothingLength, kernelTerm);
+            density += mass * influence;
         }
 
         return density;
     }
 
+    struct CalculateParticlesDensityJobFor : IJobFor
+    {
+        [ReadOnly]
+        public NativeArray<Vector2> positions;
+        public float mass;
+        public float squaredSmoothingLength;
+        public float kernelTerm;
+        
+        [WriteOnly]
+        public NativeArray<float> density;
+        public void Execute(int index)
+        {
+            density[index] = CalculateDensity(positions[index], mass, squaredSmoothingLength, kernelTerm, positions.AsReadOnlySpan());
+        }
+    }
+
     void CalculateParticlesDensity()
     {
         using var markerScope = s_DensityPerfMarker.Auto();
-
-        Parallel.For(0, m_ParticleCount, index =>
-        //for (var index = 0; index < m_ParticleCount; index++)
+        
+        JobHandle dependencyJobHandle = default;
+        var job = new CalculateParticlesDensityJobFor()
         {
-            m_Density[index] = CalculateDensity(m_Position[index]);
-        });
+            positions = m_Position,
+            mass = Mass,
+            squaredSmoothingLength = m_SquaredSmoothingLength,
+            kernelTerm = m_KernelTerm,
+            density = m_Density,
+        };
+        var velocityJobHandle = job.ScheduleParallelByRef(m_Position.Length,
+            64, dependencyJobHandle);
+        
+        velocityJobHandle.Complete();
+
+        // Parallel.For(0, m_ParticleCount, index =>
+        // {
+        //     m_Density[index] = CalculateDensity(m_Position[index]);
+        // });
     }
 
     void CalculateParticlePressure()
@@ -175,7 +282,7 @@ public class FluidSim : MonoBehaviour
         {
             
             var sqrDst = Vector2.SqrMagnitude(m_Position[i] - pos);
-            var influence = SmoothingKernel(sqrDst, SmoothingLength);
+            var influence = SmoothingKernel(sqrDst);
             //var density = CalculateDensity(pos);
             pressure += m_Pressure[i] * Mass / m_Density[i] * influence;
         }
@@ -185,15 +292,22 @@ public class FluidSim : MonoBehaviour
 
     public Vector2 CalculatePressureGradient(Vector2 pos)
     {
+        return CalculatePressureGradient(pos, Mass, m_SquaredSmoothingLength, m_KernelDerivativeTerm, m_Position, m_Pressure, m_Density);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static public Vector2 CalculatePressureGradient(Vector2 pos, float mass,float squaredSmoothingLength, float kernelDerivativeTerm,
+        ReadOnlySpan<Vector2> position, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density)
+    {
         var pressureGradient = Vector2.zero;
-        for (var i = 0; i < m_ParticleCount; i++)
+        for (var i = 0; i < position.Length; i++)
         {
-            var dif = m_Position[i] - pos;
+            var dif = position[i] - pos;
             var dir = dif.normalized;
             var sqrDst = Vector2.SqrMagnitude(dif);
             var distance = Mathf.Sqrt(sqrDst);
-            var influence = SmoothingKernelDerivative(distance, sqrDst);
-            pressureGradient += dir * (m_Pressure[i] * Mass) / m_Density[i] * influence;
+            var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
+            pressureGradient += dir * (pressure[i] * mass) / density[i] * influence;
         }
 
         return pressureGradient;
@@ -201,18 +315,30 @@ public class FluidSim : MonoBehaviour
 
     float SmoothingKernelDerivative(float dst, float sqrdDistance)
     {
-        if (sqrdDistance > m_SquaredSmoothingLength) return 0;
-        var diff = m_SquaredSmoothingLength - sqrdDistance;
+        return SmoothingKernelDerivative(dst, sqrdDistance, m_SquaredSmoothingLength, m_KernelDerivativeTerm);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static float SmoothingKernelDerivative(float dst, float sqrdDistance, float squaredSmoothingLength, float kernelDerivativeTerm)
+    {
+        if (sqrdDistance > squaredSmoothingLength) return 0;
+        var diff = squaredSmoothingLength - sqrdDistance;
         
-        return diff*diff *dst * m_KernelDerivativeTerm;
+        return diff*diff *dst * kernelDerivativeTerm;
     }
 
-    float SmoothingKernel(float sqrdDistance, float smoothingFactor)
+    float SmoothingKernel(float sqrdDistance)
     {
-        if (sqrdDistance > m_SquaredSmoothingLength) return 0;
+        return SmoothingKernel(sqrdDistance, m_SquaredSmoothingLength, m_KernelTerm);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static float SmoothingKernel(float sqrdDistance, float squaredSmoothingLength, float kernelTerm)
+    {
+        if (sqrdDistance > squaredSmoothingLength) return 0;
         //var term = 4 / (Mathf.PI * Mathf.Pow(smoothingFactor, 8));
-        var diff = m_SquaredSmoothingLength - sqrdDistance;
+        var diff = squaredSmoothingLength - sqrdDistance;
         //return 315f / (64f * Mathf.PI * Mathf.Pow(smoothingFactor,9)) * Mathf.Pow(smoothingFactor*smoothingFactor - distance*distance, 3);
-        return diff*diff*diff * m_KernelTerm;
+        return diff*diff*diff * kernelTerm;
     }
 }
