@@ -1,12 +1,16 @@
+using System;
 using System.Collections.Generic;
 using Unity.Profiling;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
+[Serializable]
 public struct Particle //probably an Struct of arrays could be beneficial
 {
     public Vector2 position;
     public float density;
     public float pressure;
+    public Vector2 velocity;
 }
 
 public class FluidSim : MonoBehaviour
@@ -17,15 +21,28 @@ public class FluidSim : MonoBehaviour
     public int height;
     public float Mass = 1;
     public float SmoothingLength = 10;
+    [Range(0, 1)]
+    public float SimulationStep = 0.0001f;
     
-    Particle[] m_Particles;
+    Vector2[] m_Position;
+    float[] m_Density;
+    float[] m_Pressure;
+    Vector2[] m_Velocity;
 
     float m_SquaredSmoothingLength;
     float m_KernelTerm;
+    float m_KernelDerivativeTerm;
     float m_TargetDensity;
     
     static readonly ProfilerMarker s_UpdatePerfMarker = new ProfilerMarker("FluidSim.Update");
-    public IReadOnlyList<Particle> GetParticles() { return m_Particles; }
+    static readonly ProfilerMarker s_StepPerfMarker = new ProfilerMarker("FluidSim.Step");
+    static readonly ProfilerMarker s_PressurePerfMarker = new ProfilerMarker("FluidSim.PressureCalc");
+    static readonly ProfilerMarker s_DensityPerfMarker = new ProfilerMarker("FluidSim.DensityeCalc");
+
+    public IReadOnlyList<Vector2> GetPositions() { return m_Position; }
+    public IReadOnlyList<float> GetDensities() { return m_Density; }
+    public IReadOnlyList<float> GetPressures() { return m_Pressure; }
+    public IReadOnlyList<Vector2> GetVelocities() { return m_Velocity; }
     
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -35,11 +52,17 @@ public class FluidSim : MonoBehaviour
 
     void InitParticles()
     {
-        m_Particles = new Particle[m_ParticleCount];
+        m_Position = new Vector2[m_ParticleCount];
+        m_Density = new float[m_ParticleCount];
+        m_Pressure = new float[m_ParticleCount];
+        m_Velocity = new Vector2[m_ParticleCount];
         for ( var i = 0; i < m_ParticleCount; i++ )
         {
             var position = new Vector2(Random.Range(0f, width), Random.Range(0f, height));
-            m_Particles[i] = new Particle() { position = position };
+            m_Position[i] = position;
+            m_Density[i] = 0;
+            m_Pressure[i] = 0;
+            m_Velocity[i] = Vector2.zero;
         }
     }
 
@@ -48,7 +71,7 @@ public class FluidSim : MonoBehaviour
     {
         using var markerScope = s_UpdatePerfMarker.Auto();
 
-        if (m_ParticleCount != m_Particles.Length)
+        if (m_ParticleCount != m_Position.Length)
         {
             InitParticles();
         }
@@ -56,6 +79,28 @@ public class FluidSim : MonoBehaviour
         CachePrecomputedValues();
         CalculateParticlesDensity();
         CalculateParticlePressure();
+        SimulateStep(SimulationStep);
+    }
+
+    void SimulateStep(float deltaTime)
+    {
+        using var markerScope = s_StepPerfMarker.Auto();
+
+        for (var index = 0; index < m_ParticleCount; index++)
+        {
+            var position = m_Position[index];
+            var density = m_Density[index];
+            var pressureForce = CalculatePressureGradient(position);
+            var pressureAcceleration = pressureForce / density;
+            var velocity = pressureAcceleration * deltaTime;
+            m_Velocity[index] += velocity;
+        }
+
+        for (var index = 0; index < m_ParticleCount; index++)
+        {
+            m_Position[index] += m_Velocity[index] * deltaTime;
+        }
+
     }
 
     public float CalcTargetDensity()
@@ -67,6 +112,7 @@ public class FluidSim : MonoBehaviour
     {
         m_SquaredSmoothingLength = SmoothingLength*SmoothingLength;
         m_KernelTerm = 4 / (Mathf.PI * Mathf.Pow(SmoothingLength, 8));
+        m_KernelDerivativeTerm = -24 / (Mathf.PI * Mathf.Pow(SmoothingLength, 8));
         m_TargetDensity = CalcTargetDensity();
     }
     
@@ -75,9 +121,8 @@ public class FluidSim : MonoBehaviour
         var density = 0f;
         for (var i = 0; i < m_ParticleCount; i++)
         {
-            var particle = m_Particles[i];
-            
-            var sqrDst = Vector2.SqrMagnitude(particle.position - pos);
+            var position = m_Position[i];
+            var sqrDst = Vector2.SqrMagnitude(position - pos);
             var influence = SmoothingKernel(sqrDst, SmoothingLength);
             density += Mass * influence;
         }
@@ -87,21 +132,23 @@ public class FluidSim : MonoBehaviour
 
     void CalculateParticlesDensity()
     {
-        for (var index = 0; index < m_Particles.Length; index++)
+        using var markerScope = s_DensityPerfMarker.Auto();
+
+        for (var index = 0; index < m_ParticleCount; index++)
         {
-            var particle = m_Particles[index];
-            m_Particles[index].density = CalculateDensity(particle.position);
+            m_Density[index] = CalculateDensity(m_Position[index]);
         }
     }
 
     void CalculateParticlePressure()
     {
+        using var markerScope = s_PressurePerfMarker.Auto();
+        
         const float stiffness = 3000;
         const float adiabaticComponent = 7;
-        for (var index = 0; index < m_Particles.Length; index++)
+        for (var index = 0; index < m_ParticleCount; index++)
         {
-            var particle = m_Particles[index];
-            m_Particles[index].pressure = stiffness * (Mathf.Pow(particle.density / m_TargetDensity, adiabaticComponent) - 1);
+            m_Pressure[index] = stiffness * (Mathf.Pow(m_Density[index] / m_TargetDensity, adiabaticComponent) - 1);
         }
     }
 
@@ -110,15 +157,38 @@ public class FluidSim : MonoBehaviour
         var pressure = 0f;
         for (var i = 0; i < m_ParticleCount; i++)
         {
-            var particle = m_Particles[i];
             
-            var sqrDst = Vector2.SqrMagnitude(particle.position - pos);
+            var sqrDst = Vector2.SqrMagnitude(m_Position[i] - pos);
             var influence = SmoothingKernel(sqrDst, SmoothingLength);
-            var density = CalculateDensity(pos);
-            pressure += particle.pressure * Mass / density * influence;
+            //var density = CalculateDensity(pos);
+            pressure += m_Pressure[i] * Mass / m_Density[i] * influence;
         }
 
         return pressure;
+    }
+
+    public Vector2 CalculatePressureGradient(Vector2 pos)
+    {
+        var pressureGradient = Vector2.zero;
+        for (var i = 0; i < m_ParticleCount; i++)
+        {
+            var dif = m_Position[i] - pos;
+            var dir = dif.normalized;
+            var sqrDst = Vector2.SqrMagnitude(dif);
+            var distance = Mathf.Sqrt(sqrDst);
+            var influence = SmoothingKernelDerivative(distance, sqrDst);
+            pressureGradient += dir * (m_Pressure[i] * Mass) / m_Density[i] * influence;
+        }
+
+        return pressureGradient;
+    }
+
+    float SmoothingKernelDerivative(float dst, float sqrdDistance)
+    {
+        if (sqrdDistance > m_SquaredSmoothingLength) return 0;
+        var diff = m_SquaredSmoothingLength - sqrdDistance;
+        
+        return diff*diff *dst * m_KernelDerivativeTerm;
     }
 
     float SmoothingKernel(float sqrdDistance, float smoothingFactor)

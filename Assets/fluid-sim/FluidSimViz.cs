@@ -27,7 +27,6 @@ public class FluidSimViz : MonoBehaviour
     FluidSim m_FluidSim;
     
     Texture2D m_Texture;
-    List<float> m_ParticlesArray;
     Mesh m_Mesh;
     
     float[] m_PointPositionData;
@@ -44,7 +43,6 @@ public class FluidSimViz : MonoBehaviour
     {
         m_FluidSim = GetComponent<FluidSim>();
         InitTexture();
-        m_ParticlesArray = new List<float>(m_FluidSim.GetParticles().Count);
         m_Mesh = new Mesh();
         m_Mesh.SetVertices(new Vector3[]{new (0, 0), new (0, -1), new (1, -1), new (1, 0)});
         m_Mesh.SetIndices(new int[]{0, 2, 1, 0, 3, 2}, MeshTopology.Triangles, 0);
@@ -65,13 +63,8 @@ public class FluidSimViz : MonoBehaviour
         {
             InitTexture();
         }
-
-        if (m_ParticlesArray.Count != m_FluidSim.GetParticles().Count)
-        {
-           m_ParticlesArray.Capacity = m_FluidSim.GetParticles().Count;
-        }
         
-        var particles = m_FluidSim.GetParticles();
+        //var particles = m_FluidSim.GetParticles();
         // var colors = new Color[m_Texture.width * m_Texture.height];
         // for (var x = 0; x < m_Texture.width; x++)
         // {
@@ -87,7 +80,7 @@ public class FluidSimViz : MonoBehaviour
         // m_Texture.SetPixels(colors);
         // m_Texture.Apply();
 
-        if (m_PointBuffer == null || m_PointBuffer.count != particles.Count * 2)
+        if (m_PointBuffer == null || m_PointDensitiesBuffer.count != m_FluidSim.m_ParticleCount)
         {
             if (m_PointBuffer != null)
                 m_PointBuffer.Release();
@@ -96,21 +89,30 @@ public class FluidSimViz : MonoBehaviour
             if (m_PointPressureBuffer != null)
                 m_PointPressureBuffer.Release();
 
-            m_PointPositionData = new float[particles.Count * 2];
+            m_PointPositionData = new float[m_FluidSim.m_ParticleCount * 2];
             m_PointBuffer = new ComputeBuffer(m_PointPositionData.Length, sizeof(float));
-            m_PointDensitiesData = new float[particles.Count];
+            m_PointDensitiesData = new float[m_FluidSim.m_ParticleCount];
             m_PointDensitiesBuffer = new ComputeBuffer(m_PointDensitiesData.Length, sizeof(float));
-            m_PointPressureData = new float[particles.Count];
+            m_PointPressureData = new float[m_FluidSim.m_ParticleCount];
             m_PointPressureBuffer = new ComputeBuffer(m_PointPressureData.Length, sizeof(float));
         }
-        
-        for (var index = 0; index < particles.Count; index++)
+
+        var positions = m_FluidSim.GetPositions();
+        for (var index = 0; index < m_FluidSim.m_ParticleCount; index++)
         {
-            var particle = particles[index];
-            m_PointPositionData[index * 2] = particle.position.x;
-            m_PointPositionData[index * 2 + 1] = particle.position.y;
-            m_PointDensitiesData[index] = particle.density;
-            m_PointPressureData[index] = particle.pressure;
+            var position = positions[index];
+            m_PointPositionData[index * 2] = position.x;
+            m_PointPositionData[index * 2 + 1] = position.y;
+        }
+        var densities = m_FluidSim.GetDensities();
+        for (var index = 0; index < m_FluidSim.m_ParticleCount; index++)
+        {
+            m_PointDensitiesData[index] = densities[index];
+        }
+        var pressure = m_FluidSim.GetPressures();
+        for (var index = 0; index < m_FluidSim.m_ParticleCount; index++)
+        {
+            m_PointPressureData[index] = pressure[index];
         }
         
         m_PointBuffer.SetData(m_PointPositionData);
@@ -119,7 +121,7 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetBuffer("_particle_positions", m_PointBuffer);
         m_FluidMaterialDebugViz.SetBuffer("_particle_densities", m_PointDensitiesBuffer);
         m_FluidMaterialDebugViz.SetBuffer("_particle_pressures", m_PointPressureBuffer);
-        m_FluidMaterialDebugViz.SetInt("_PointCount", m_FluidSim.GetParticles().Count);
+        m_FluidMaterialDebugViz.SetInt("_PointCount", m_FluidSim.m_ParticleCount);
         
         m_FluidMaterialDebugViz.SetFloat("_sizex", m_FluidSim.width);
         m_FluidMaterialDebugViz.SetFloat("_sizey", m_FluidSim.height);
@@ -176,11 +178,11 @@ public class FluidSimViz : MonoBehaviour
         DrawLine(bottomleft, topleft, thickness, Color.gray);
         
         
-        var particles = m_FluidSim.GetParticles();
-        for (var i = 0; i < particles.Count; i++)
+        var positions = m_FluidSim.GetPositions();
+        for (var i = 0; i < m_FluidSim.m_ParticleCount; i++)
         {
-            var particle = particles[i];
-            DrawCircle(particle.position, m_CircleSize, Color.blue);
+            var position = positions[i];
+            DrawCircle(position, m_CircleSize, Color.blue);
         }
         
     }
