@@ -20,6 +20,10 @@ public class FluidSimViz : MonoBehaviour
     public bool m_ShowOverlay = false;
     public float m_DensityVizFactor = 1;
     public VisualizationMode m_VisualizationMode = VisualizationMode.Density;
+    public Color m_NegativePressureColor;
+    public Color m_NeutralPressureColor;
+    public Color m_PositivePressureColor;
+    
     FluidSim m_FluidSim;
     
     Texture2D m_Texture;
@@ -117,7 +121,6 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetBuffer("_particle_pressures", m_PointPressureBuffer);
         m_FluidMaterialDebugViz.SetInt("_PointCount", m_FluidSim.GetParticles().Count);
         
-        
         m_FluidMaterialDebugViz.SetFloat("_sizex", m_FluidSim.width);
         m_FluidMaterialDebugViz.SetFloat("_sizey", m_FluidSim.height);
         m_FluidMaterialDebugViz.SetFloat("_mousex", m_MousePos.x);
@@ -126,7 +129,11 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_DensityVizFactor", m_DensityVizFactor);
         m_FluidMaterialDebugViz.SetFloat("_circleSize", m_CircleSize);
         m_FluidMaterialDebugViz.SetInt("_visMode", (int)m_VisualizationMode);
+        m_FluidMaterialDebugViz.SetColor("_negativePressureColor", m_NegativePressureColor);
+        m_FluidMaterialDebugViz.SetColor("_neutralPressureColor", m_NeutralPressureColor);
+        m_FluidMaterialDebugViz.SetColor("_positivePressureColor", m_PositivePressureColor);
         
+
 
         //This code is shit, all I wanted is to draw something screen space, I tried using CommandBuffers, but somethings I needed were not compatible with SRP
         // var worldPoint = Camera.main.ScreenToWorldPoint(new Vector3(0, Camera.main.pixelHeight-1, 1));

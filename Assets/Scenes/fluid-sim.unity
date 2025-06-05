@@ -638,9 +638,13 @@ MonoBehaviour:
   m_CircleTexture: {fileID: 2800000, guid: 810fda614b13807479b5eae6ca3a5273, type: 3}
   m_CircleMaterial: {fileID: 2100000, guid: 539cb3a3c2db542428b31eda28b96e97, type: 2}
   m_FluidMaterialDebugViz: {fileID: 2100000, guid: 3d457eca536bc2e418f09bb367bb7858, type: 2}
-  m_CircleSize: 10
+  m_CircleSize: 1
   m_ShowOverlay: 0
-  m_DensityVizFactor: 1
+  m_DensityVizFactor: 57.4
+  m_VisualizationMode: 0
+  m_NegativePressureColor: {r: 0, g: 0.09055519, b: 0.53333336, a: 0}
+  m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
+  m_PositivePressureColor: {r: 0.735849, g: 0, b: 0, a: 0}
 --- !u!114 &2014640969
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -653,9 +657,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 605d4fe371862ae4da086394dbdab1ad, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_ParticleCount: 100
-  width: 1000
-  height: 500
+  m_ParticleCount: 500
+  width: 250
+  height: 250
   Mass: 1
   SmoothingLength: 10
 --- !u!4 &2014640970

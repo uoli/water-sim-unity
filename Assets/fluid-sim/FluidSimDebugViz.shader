@@ -36,6 +36,9 @@ Shader "Unlit/FluidSimDebugViz"
     float _DensityVizFactor;
     float _circleSize;
     int _visMode;
+    float4 _negativePressureColor;
+    float4 _neutralPressureColor;
+    float4 _positivePressureColor;
 
     v2f vert (appdata v)
     {
@@ -113,16 +116,21 @@ Shader "Unlit/FluidSimDebugViz"
         float2 localPos = float2(screenPixel.x, _ScreenParams.y - screenPixel.y)  ;
         //fixed4 col = float4(1, frac(localPos / _ScreenParams.xy) , 1);
 
-        float prop;
-        if (_visMode == 0)
-        {
-            prop = CalculateDensity(localPos);
-        } else if (_visMode == 1)
-        {
-            prop = CalculatePressure(localPos);
+        fixed4 col;
+        if (_visMode == 0) {
+            float prop = CalculateDensity(localPos);
+            col = float4(1,prop*_DensityVizFactor,0,1);
+        } else if (_visMode == 1) {
+            float prop = CalculatePressure(localPos);
+            if (prop < -10)
+                col = _negativePressureColor;
+            else if (prop > 10)
+                col = _positivePressureColor;
+            else
+                col = _neutralPressureColor;
         }
 
-        fixed4 col = float4(1,prop*_DensityVizFactor,0,1);
+        
 
         float2 pos = mouse;
         if (distance(pos, localPos) <100)
