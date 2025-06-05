@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Unity.Collections;
 using Unity.Profiling;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -26,8 +27,8 @@ public class FluidSim : MonoBehaviour
     public float SimulationStep = 0.0001f;
     
     Vector2[] m_Position;
-    float[] m_Density;
-    float[] m_Pressure;
+    NativeArray<float> m_Density;
+    NativeArray<float> m_Pressure;
     Vector2[] m_Velocity;
 
     float m_SquaredSmoothingLength;
@@ -41,8 +42,8 @@ public class FluidSim : MonoBehaviour
     static readonly ProfilerMarker s_DensityPerfMarker = new ProfilerMarker("FluidSim.DensityeCalc");
 
     public IReadOnlyList<Vector2> GetPositions() { return m_Position; }
-    public IReadOnlyList<float> GetDensities() { return m_Density; }
-    public IReadOnlyList<float> GetPressures() { return m_Pressure; }
+    public NativeArray<float>.ReadOnly GetDensities() { return m_Density.AsReadOnly(); }
+    public NativeArray<float>.ReadOnly GetPressures() { return m_Pressure.AsReadOnly(); }
     public IReadOnlyList<Vector2> GetVelocities() { return m_Velocity; }
     
     // Start is called once before the first execution of Update after the MonoBehaviour is created
@@ -54,8 +55,8 @@ public class FluidSim : MonoBehaviour
     void InitParticles()
     {
         m_Position = new Vector2[m_ParticleCount];
-        m_Density = new float[m_ParticleCount];
-        m_Pressure = new float[m_ParticleCount];
+        m_Density = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
+        m_Pressure = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
         m_Velocity = new Vector2[m_ParticleCount];
         for ( var i = 0; i < m_ParticleCount; i++ )
         {
@@ -145,10 +146,11 @@ public class FluidSim : MonoBehaviour
     {
         using var markerScope = s_DensityPerfMarker.Auto();
 
-        for (var index = 0; index < m_ParticleCount; index++)
+        Parallel.For(0, m_ParticleCount, index =>
+        //for (var index = 0; index < m_ParticleCount; index++)
         {
             m_Density[index] = CalculateDensity(m_Position[index]);
-        }
+        });
     }
 
     void CalculateParticlePressure()
@@ -157,10 +159,13 @@ public class FluidSim : MonoBehaviour
         
         const float stiffness = 3000;
         const float adiabaticComponent = 7;
+        //Parallel.For(0, m_ParticleCount, index =>
         for (var index = 0; index < m_ParticleCount; index++)
         {
             m_Pressure[index] = stiffness * (Mathf.Pow(m_Density[index] / m_TargetDensity, adiabaticComponent) - 1);
         }
+
+        //});
     }
 
     public float CalculatePressure(Vector2 pos)
