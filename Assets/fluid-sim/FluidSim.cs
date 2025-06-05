@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Unity.Profiling;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -86,7 +87,7 @@ public class FluidSim : MonoBehaviour
     {
         using var markerScope = s_StepPerfMarker.Auto();
 
-        for (var index = 0; index < m_ParticleCount; index++)
+        Parallel.For(0, m_ParticleCount, index =>
         {
             var position = m_Position[index];
             var density = m_Density[index];
@@ -94,12 +95,22 @@ public class FluidSim : MonoBehaviour
             var pressureAcceleration = pressureForce / density;
             var velocity = pressureAcceleration * deltaTime;
             m_Velocity[index] += velocity;
-        }
+        });
 
-        for (var index = 0; index < m_ParticleCount; index++)
+        Parallel.For(0, m_ParticleCount, index =>
         {
-            m_Position[index] += m_Velocity[index] * deltaTime;
-        }
+            var position = m_Position[index];
+            position += m_Velocity[index] * deltaTime;
+            if (position.x < 0)
+                position.x = 0;
+            if (position.y < 0)
+                position.y = 0;
+            if (position.x > width)
+                position.x = width;
+            if (position.y > height)
+                position.y = height;
+            m_Position[index] = position;
+        });
 
     }
 
