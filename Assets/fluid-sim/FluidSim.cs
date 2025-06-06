@@ -15,6 +15,7 @@ public class FluidSim : MonoBehaviour
     public int height;
     public float Mass = 1;
     public float SmoothingLength = 10;
+    public float m_PressureMultiplier = 1;
     [Range(0, 1)]
     public float SimulationStep = 0.0001f;
     public float BoundaryPushStrength = 1;
@@ -344,15 +345,20 @@ public class FluidSim : MonoBehaviour
     {
         using var markerScope = s_PressurePerfMarker.Auto();
         
-        const float stiffness = 3000;
-        const float adiabaticComponent = 7;
-        //Parallel.For(0, m_ParticleCount, index =>
+        // const float stiffness = 300;
+        // const float adiabaticComponent = 2;
+        // for (var index = 0; index < m_ParticleCount; index++)
+        // {
+        //     m_Pressure[index] = stiffness * (Mathf.Pow(m_Density[index] / m_TargetDensity, adiabaticComponent) - 1);
+        // }
+        
+
         for (var index = 0; index < m_ParticleCount; index++)
         {
-            m_Pressure[index] = stiffness * (Mathf.Pow(m_Density[index] / m_TargetDensity, adiabaticComponent) - 1);
+            var densityError = m_Density[index] - m_TargetDensity;
+            var pressure = densityError * m_PressureMultiplier;
+            m_Pressure[index] = pressure;
         }
-
-        //});
     }
 
     public float CalculatePressure(Vector2 pos)

@@ -39,6 +39,8 @@ Shader "Unlit/FluidSimDebugViz"
     int _visMode;
     float _min_pressure;
     float _max_pressure;
+    float _target_density;
+    float _max_density;
     float4 _negativePressureColor;
     float4 _neutralPressureColor;
     float4 _positivePressureColor;
@@ -170,29 +172,31 @@ Shader "Unlit/FluidSimDebugViz"
         float2 screenPixel = normalizedScreenCoord *  _ScreenParams.xy ;
         float2 localPos = float2(screenPixel.x, _ScreenParams.y - screenPixel.y) / _scaling_factor;
         //fixed4 col = float4(1, frac(localPos / _ScreenParams.xy) , 1);
+        _min_pressure = min(_min_pressure, -1);
 
         fixed4 col;
         if (_visMode == 0) {
             float prop = CalculateDensity(localPos);
-            col = float4(1,prop*_DensityVizFactor,0,1);
-        } else if (_visMode == 1) {
-            float prop = CalculatePressure(localPos);
-            
-            if (prop < 0)
+            if (prop < _target_density)
             {
-                float t = inverseLerp(_min_pressure, 0, prop);
+                float t = inverseLerp(0, _target_density, prop);
                 col = lerp(_negativePressureColor,_neutralPressureColor, t);
             }
-            else if (prop > 0)
+            else if (prop > _target_density)
             {
-                float t = inverseLerp(0, _max_pressure, prop);
+                float t = inverseLerp(_target_density, _max_density, prop);
                 col = lerp(_neutralPressureColor,_positivePressureColor, t);
-                //col = _positivePressureColor;
             }
             else
             {
                 col = _neutralPressureColor;
             }
+        } else if (_visMode == 1) {
+            float prop = CalculatePressure(localPos);
+            
+            float t = inverseLerp(_min_pressure, _max_pressure, prop);
+            col = lerp(_negativePressureColor,_positivePressureColor, t);
+           
             //col = float4(1,prop*_DensityVizFactor,0,1);
         } else if (_visMode == 2)
         {

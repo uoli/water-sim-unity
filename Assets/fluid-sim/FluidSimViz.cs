@@ -142,9 +142,12 @@ public class FluidSimViz : MonoBehaviour
             m_PointPositionData[index * 2 + 1] = position.y;
         }
         var densities = m_FluidSim.GetDensities();
+        var maxDensity = 0f;
         for (var index = 0; index < m_FluidSim.m_ParticleCount; index++)
         {
             m_PointDensitiesData[index] = densities[index];
+            if (densities[index] > maxDensity)
+                maxDensity = densities[index];
         }
         
         var pressure = m_FluidSim.GetPressures();
@@ -192,6 +195,8 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetColor("_positivePressureColor", m_PositivePressureColor);
         m_FluidMaterialDebugViz.SetFloat("_max_pressure", maxPressure);
         m_FluidMaterialDebugViz.SetFloat("_min_pressure", minPressure);
+        m_FluidMaterialDebugViz.SetFloat("_target_density", m_FluidSim.CalcTargetDensity());
+        m_FluidMaterialDebugViz.SetFloat("_max_density", maxDensity);
         
 
 
