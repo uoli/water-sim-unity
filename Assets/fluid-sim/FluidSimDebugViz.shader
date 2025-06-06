@@ -152,7 +152,6 @@ Shader "Unlit/FluidSimDebugViz"
             //float influence = SmoothingKernelDerivative(distance, sqrDst);
             float influence = SmoothingKernel2Derivative(distance, _smoothingLength);
             pressureGradient += dir * (pressure * mass) / density * influence;
-            //pressureGradient += dir;
         }
 
         return pressureGradient;

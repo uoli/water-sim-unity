@@ -105,25 +105,34 @@ public class FluidSim : MonoBehaviour
     struct CalculatePositionFromVelocityJobFor : IJobFor
     {
         public NativeArray<Vector2> positions;
+        public NativeArray<Vector2> velocities;
+
         public float deltaTime;
         public float width;
         public float height;
-        
-        [ReadOnly]
-        public NativeArray<Vector2> velocities;
         public void Execute(int index)
         {
             var position = positions[index];
-            position += velocities[index] * deltaTime;
-            if (position.x < 0)
+            var velocity = velocities[index];
+            position += velocity * deltaTime;
+            if (position.x < 0) {
                 position.x = 0;
-            if (position.y < 0)
+                velocity.x *= -0.5f;
+            }
+            if (position.y < 0) {
                 position.y = 0;
-            if (position.x > width)
+                velocity.y *= -0.5f;
+            }
+            if (position.x > width) {
                 position.x = width;
-            if (position.y > height)
+                velocity.x *= -0.5f;
+            }
+            if (position.y > height) {
                 position.y = height;
+                velocity.y *= -0.5f;
+            }
             positions[index] = position;
+            velocities[index] = velocity;
         }
     }
     
@@ -150,7 +159,7 @@ public class FluidSim : MonoBehaviour
                 positions, pressures, densities);
             var pressureAcceleration = pressureForce / density;
             var velocity = pressureAcceleration * deltaTime;
-            velocities[index] = velocity;
+            velocities[index] += velocity;
         }
     }
 

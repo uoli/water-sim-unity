@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using Unity.Profiling;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Serialization;
+using Vector2 = UnityEngine.Vector2;
+using Vector3 = UnityEngine.Vector3;
 
 public enum VisualizationMode
 {
@@ -40,6 +43,8 @@ public class FluidSimViz : MonoBehaviour
     ComputeBuffer m_PointDensitiesBuffer;
     ComputeBuffer m_PointPressureBuffer;
     ComputeBuffer m_PointVelocityBuffer;
+
+    float m_KineticEnergy = 0;
     
     static readonly ProfilerMarker s_UpdatePerfMarker = new ProfilerMarker("FluidSimViz.Update");
     static readonly ProfilerMarker s_OnGuiPerfMarker = new ProfilerMarker("FluidSimViz.OnGUi");
@@ -153,11 +158,13 @@ public class FluidSimViz : MonoBehaviour
         }
         
         var velocities = m_FluidSim.GetVelocities();
+        m_KineticEnergy = 0;
         for (var index = 0; index < m_FluidSim.m_ParticleCount; index++)
         {
             var velocity = velocities[index];
             m_PointVelocityData[index * 2] = velocity.x;
             m_PointVelocityData[index * 2 + 1] = velocity.y;
+            m_KineticEnergy += 0.5f * m_FluidSim.Mass * Vector2.Dot(velocity, velocity);
         }
         
         m_PointBuffer.SetData(m_PointPositionData);
@@ -197,6 +204,7 @@ public class FluidSimViz : MonoBehaviour
     
 
     Vector2 m_MousePos = Vector2.zero;
+    GUIContent energyContent = new GUIContent();
     void OnGUI()
     {
         using var markerScope = s_OnGuiPerfMarker.Auto();
@@ -206,11 +214,14 @@ public class FluidSimViz : MonoBehaviour
             m_MousePos = Event.current.mousePosition;
         }
         
+        
+        
         if (Event.current.type != EventType.Repaint) return;
         
-        
-        
         DrawMaterial(new Rect(0,0, m_FluidSim.width * m_ScalingFactor, m_FluidSim.height * m_ScalingFactor), m_FluidMaterialDebugViz);
+        energyContent.text = $"Kinetic Energy: {m_KineticEnergy}";
+        GUI.skin.label.Draw(new Rect(0,0,1000,20), energyContent, 0 );
+        
 
         if (!m_ShowOverlay) return;
         var thickness = 1;
