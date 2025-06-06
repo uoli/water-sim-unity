@@ -18,6 +18,7 @@ public class FluidSim : MonoBehaviour
     public float SmoothingLength = 10;
     [Range(0, 1)]
     public float SimulationStep = 0.0001f;
+    public bool AutoStep = true;
     
     NativeArray<Vector2> m_Position;
     NativeArray<float> m_Density;
@@ -82,13 +83,19 @@ public class FluidSim : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        using var markerScope = s_UpdatePerfMarker.Auto();
-
         if (m_ParticleCount != m_Position.Length)
         {
             InitParticles();
         }
+        
+        if (AutoStep)
+            DoUpdate();
+    }
 
+    public void DoUpdate()
+    {
+        using var markerScope = s_UpdatePerfMarker.Auto();
+        
         CachePrecomputedValues();
         CalculateParticlesDensity();
         CalculateParticlePressure();
@@ -132,13 +139,14 @@ public class FluidSim : MonoBehaviour
         public NativeArray<Vector2> velocities;
         public float mass;
         public float squaredSmoothingLength;
+        public float smoothingLength;
         public float kernelDerivativeTerm;
         public float deltaTime;
         public void Execute(int index)
         {
             var position = positions[index];
             var density = densities[index]; 
-            var pressureForce = CalculatePressureGradient(position, mass, squaredSmoothingLength, kernelDerivativeTerm,
+            var pressureForce = CalculatePressureGradient(position, mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm,
                 positions, pressures, densities);
             var pressureAcceleration = pressureForce / density;
             var velocity = pressureAcceleration * deltaTime;
@@ -160,6 +168,7 @@ public class FluidSim : MonoBehaviour
             deltaTime = deltaTime,
             mass = Mass,
             squaredSmoothingLength = m_SquaredSmoothingLength,
+            smoothingLength = SmoothingLength,
             kernelDerivativeTerm = m_KernelDerivativeTerm,
         };
         var velocityFromPressureJobHandle = velocityFromPressureJob.ScheduleParallelByRef(m_Position.Length,
@@ -193,18 +202,19 @@ public class FluidSim : MonoBehaviour
 
     float CalculateDensity(Vector2 pos)
     {
-        return CalculateDensity(pos, Mass, m_SquaredSmoothingLength, m_KernelTerm, m_Position.AsReadOnlySpan());
+        return CalculateDensity(pos, Mass, m_SquaredSmoothingLength, SmoothingLength, m_KernelTerm, m_Position.AsReadOnlySpan());
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static float CalculateDensity(Vector2 pos, float mass, float squaredSmoothingLength, float kernelTerm, ReadOnlySpan<Vector2> positions)
+    static float CalculateDensity(Vector2 pos, float mass, float squaredSmoothingLength, float smoothingLength, float kernelTerm, ReadOnlySpan<Vector2> positions)
     {
         var density = 0f;
         for (var i = 0; i < positions.Length; i++)
         {
             var position = positions[i];
             var sqrDst = Vector2.SqrMagnitude(position - pos);
-            var influence = SmoothingKernel(sqrDst, squaredSmoothingLength, kernelTerm);
+            //var influence = SmoothingKernel(sqrDst, squaredSmoothingLength, kernelTerm);
+            var influence = SmoothingKernel2(Mathf.Sqrt(sqrDst), smoothingLength);
             density += mass * influence;
         }
 
@@ -217,13 +227,14 @@ public class FluidSim : MonoBehaviour
         public NativeArray<Vector2> positions;
         public float mass;
         public float squaredSmoothingLength;
+        public float smoothingLength;
         public float kernelTerm;
         
         [WriteOnly]
         public NativeArray<float> density;
         public void Execute(int index)
         {
-            density[index] = CalculateDensity(positions[index], mass, squaredSmoothingLength, kernelTerm, positions.AsReadOnlySpan());
+            density[index] = CalculateDensity(positions[index], mass, squaredSmoothingLength, smoothingLength, kernelTerm, positions.AsReadOnlySpan());
         }
     }
 
@@ -237,6 +248,7 @@ public class FluidSim : MonoBehaviour
             positions = m_Position,
             mass = Mass,
             squaredSmoothingLength = m_SquaredSmoothingLength,
+            smoothingLength = SmoothingLength,
             kernelTerm = m_KernelTerm,
             density = m_Density,
         };
@@ -273,7 +285,8 @@ public class FluidSim : MonoBehaviour
         {
             
             var sqrDst = Vector2.SqrMagnitude(m_Position[i] - pos);
-            var influence = SmoothingKernel(sqrDst);
+            var influence = SmoothingKernel2(Mathf.Sqrt(sqrDst), SmoothingLength);
+            //var influence = SmoothingKernel(sqrDst);
             //var density = CalculateDensity(pos);
             pressure += m_Pressure[i] * Mass / m_Density[i] * influence;
         }
@@ -283,11 +296,11 @@ public class FluidSim : MonoBehaviour
 
     public Vector2 CalculatePressureGradient(Vector2 pos)
     {
-        return CalculatePressureGradient(pos, Mass, m_SquaredSmoothingLength, m_KernelDerivativeTerm, m_Position, m_Pressure, m_Density);
+        return CalculatePressureGradient(pos, Mass, m_SquaredSmoothingLength, SmoothingLength, m_KernelDerivativeTerm, m_Position, m_Pressure, m_Density);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static public Vector2 CalculatePressureGradient(Vector2 pos, float mass,float squaredSmoothingLength, float kernelDerivativeTerm,
+    static public Vector2 CalculatePressureGradient(Vector2 pos, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
         ReadOnlySpan<Vector2> position, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density)
     {
         var pressureGradient = Vector2.zero;
@@ -297,7 +310,8 @@ public class FluidSim : MonoBehaviour
             var dir = dif.normalized;
             var sqrDst = Vector2.SqrMagnitude(dif);
             var distance = Mathf.Sqrt(sqrDst);
-            var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
+            //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
+            var influence = SmoothingKernel2Derivative(distance, smoothingLength);
             pressureGradient += dir * (pressure[i] * mass) / density[i] * influence;
         }
 

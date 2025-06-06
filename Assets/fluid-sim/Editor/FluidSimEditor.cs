@@ -13,6 +13,11 @@ public class FluidSimEditor : Editor
         {
             sim.SmoothingLength = 1.3f * Mathf.Sqrt(sim.width * sim.height/ (float) sim.m_ParticleCount);
         }
+
+        if (GUILayout.Button("Step Simulation"))
+        {
+            sim.DoUpdate();
+        }
         EditorGUILayout.LabelField($"TargetDensity:{sim.CalcTargetDensity()}");
     }
 }

@@ -142,7 +142,7 @@ public class FluidSimViz : MonoBehaviour
         
         var pressure = m_FluidSim.GetPressures();
         var maxPressure = pressure[0];
-        var minPressure = pressure[1];
+        var minPressure = pressure[0];
         for (var index = 0; index < m_FluidSim.m_ParticleCount; index++)
         {
             m_PointPressureData[index] = pressure[index];

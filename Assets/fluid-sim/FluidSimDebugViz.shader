@@ -80,6 +80,22 @@ Shader "Unlit/FluidSimDebugViz"
         return diff*diff *dst * kernel_derivative_term;
     }
 
+    static float SmoothingKernel2(float dst, float radius)
+    {
+        if (dst > radius) return 0;
+
+        float volume = (PI * pow(radius, 4)) / 6;
+        return (radius - dst) * (radius - dst) / volume;
+    }
+    
+    static float SmoothingKernel2Derivative(float dst, float radius)
+    {
+        if (dst > radius) return 0;
+
+        float scale = 12 / (pow(radius, 4) * PI);
+        return (dst - radius ) * scale;
+    }
+
     float squaredDistance(float2 a, float2 b)
     {
         float2 diff = a-b;
@@ -94,7 +110,8 @@ Shader "Unlit/FluidSimDebugViz"
             float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
             float squaredDist = squaredDistance(particlePos,pos);
             //float dst = distance(particlePos, pos);
-            float influence = SmoothingKernel(squaredDist);
+            //float influence = SmoothingKernel(squaredDist);
+            float influence = SmoothingKernel2(sqrt(squaredDist), _smoothingLength);
             density += mass * influence;
         }
 
@@ -109,7 +126,8 @@ Shader "Unlit/FluidSimDebugViz"
             float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
             float squaredDist = squaredDistance(particlePos,pos);
             //float dst = distance(particlePos, pos);
-            float influence = SmoothingKernel(squaredDist);
+            //float influence = SmoothingKernel(squaredDist);
+            float influence = SmoothingKernel2(sqrt(squaredDist), _smoothingLength);
             float density = _particle_densities[i];
             float particle_pressure = _particle_pressures[i];
             pressure += particle_pressure * mass / density * influence;
@@ -125,14 +143,16 @@ Shader "Unlit/FluidSimDebugViz"
         {
             float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
             float sqrDst = squaredDistance(particlePos,pos );
-            if (sqrDst > squared_smooth_length) continue;
+            if (sqrDst < 0.001 || sqrDst > squared_smooth_length) continue;
             float2 dif = particlePos - pos;
-            float dir = normalize(dif);
+            float2 dir = normalize(dif);
             float pressure = _particle_pressures[i];
             float density = _particle_densities[i];
             float distance = sqrt(sqrDst);
-            float influence = SmoothingKernelDerivative(distance, sqrDst);
+            //float influence = SmoothingKernelDerivative(distance, sqrDst);
+            float influence = SmoothingKernel2Derivative(distance, _smoothingLength);
             pressureGradient += dir * (pressure * mass) / density * influence;
+            //pressureGradient += dir;
         }
 
         return pressureGradient;
