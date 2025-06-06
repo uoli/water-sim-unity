@@ -120,7 +120,7 @@ public class FluidSim : MonoBehaviour
         }
     }
     
-    struct AccumulateVelocityFromPressureJobFor : IJobFor
+    struct SetVelocityFromPressureJobFor : IJobFor
     {
         [ReadOnly]
         public NativeArray<Vector2> positions;
@@ -142,7 +142,7 @@ public class FluidSim : MonoBehaviour
                 positions, pressures, densities);
             var pressureAcceleration = pressureForce / density;
             var velocity = pressureAcceleration * deltaTime;
-            velocities[index] += velocity;
+            velocities[index] = velocity;
         }
     }
 
@@ -151,7 +151,7 @@ public class FluidSim : MonoBehaviour
         using var markerScope = s_StepPerfMarker.Auto();
         
         JobHandle dependencyJobHandle = default;
-        var velocityFromPressureJob = new AccumulateVelocityFromPressureJobFor()
+        var velocityFromPressureJob = new SetVelocityFromPressureJobFor()
         {
             positions = m_Position,
             densities = m_Density,
@@ -302,6 +302,22 @@ public class FluidSim : MonoBehaviour
         }
 
         return pressureGradient;
+    }
+
+    static float SmoothingKernel2(float dst, float radius)
+    {
+        if (dst > radius) return 0;
+
+        float volume = (Mathf.PI * Mathf.Pow(radius, 4)) / 6;
+        return (radius - dst) * (radius - dst) / volume;
+    }
+    
+    static float SmoothingKernel2Derivative(float dst, float radius)
+    {
+        if (dst > radius) return 0;
+
+        float scale = 12 / (Mathf.Pow(radius, 4) * Mathf.PI);
+        return (dst - radius ) * scale;
     }
 
     float SmoothingKernelDerivative(float dst, float sqrdDistance)

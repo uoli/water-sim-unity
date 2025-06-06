@@ -9,6 +9,7 @@ public enum VisualizationMode
 {
     Density = 0,
     Pressure = 1,
+    PressureGradient = 2,
 }
 
 public class FluidSimViz : MonoBehaviour
@@ -34,9 +35,11 @@ public class FluidSimViz : MonoBehaviour
     float[] m_PointPositionData;
     float[] m_PointDensitiesData;
     float[] m_PointPressureData;
+    float[] m_PointVelocityData;
     ComputeBuffer m_PointBuffer;
     ComputeBuffer m_PointDensitiesBuffer;
     ComputeBuffer m_PointPressureBuffer;
+    ComputeBuffer m_PointVelocityBuffer;
     
     static readonly ProfilerMarker s_UpdatePerfMarker = new ProfilerMarker("FluidSimViz.Update");
     static readonly ProfilerMarker s_OnGuiPerfMarker = new ProfilerMarker("FluidSimViz.OnGUi");
@@ -81,6 +84,8 @@ public class FluidSimViz : MonoBehaviour
             m_PointDensitiesBuffer.Release();
         if (m_PointPressureBuffer != null)
             m_PointPressureBuffer.Release();
+        if (m_PointVelocityBuffer != null)
+            m_PointVelocityBuffer.Release();
     }
     
     // Update is called once per frame
@@ -118,6 +123,8 @@ public class FluidSimViz : MonoBehaviour
             m_PointDensitiesBuffer = new ComputeBuffer(m_PointDensitiesData.Length, sizeof(float));
             m_PointPressureData = new float[m_FluidSim.m_ParticleCount];
             m_PointPressureBuffer = new ComputeBuffer(m_PointPressureData.Length, sizeof(float));
+            m_PointVelocityData = new float[m_FluidSim.m_ParticleCount*2];
+            m_PointVelocityBuffer = new ComputeBuffer(m_PointVelocityData.Length, sizeof(float));
         }
 
         var positions = m_FluidSim.GetPositions();
@@ -143,6 +150,14 @@ public class FluidSimViz : MonoBehaviour
                 maxPressure = m_PointPressureData[index];
             if (m_PointPressureData[index] < minPressure)
                 minPressure = m_PointPressureData[index];
+        }
+        
+        var velocities = m_FluidSim.GetVelocities();
+        for (var index = 0; index < m_FluidSim.m_ParticleCount; index++)
+        {
+            var velocity = velocities[index];
+            m_PointVelocityData[index * 2] = velocity.x;
+            m_PointVelocityData[index * 2 + 1] = velocity.y;
         }
         
         m_PointBuffer.SetData(m_PointPositionData);
@@ -213,10 +228,15 @@ public class FluidSimViz : MonoBehaviour
         
         
         var positions = m_FluidSim.GetPositions();
+        var velocities = m_FluidSim.GetVelocities();
+
         for (var i = 0; i < m_FluidSim.m_ParticleCount; i++)
         {
             var position = positions[i] * m_ScalingFactor;
+            var velocity = velocities[i];
+
             DrawCircle(position, m_CircleSize * m_ScalingFactor, Color.blue);
+            DrawArrow(position, velocity, Color.green);
         }
         
     }
@@ -236,6 +256,17 @@ public class FluidSimViz : MonoBehaviour
     {
         //var rect = new Rect(0,0, thickness, thickness);
         Handles.DrawLine(start, end, thickness);
+    }
+
+    static void DrawArrow(Vector2 position, Vector2 direction, Color color)
+    {
+        var prevColor = Handles.color;
+        Handles.color = color;
+        // var newDir = Quaternion.AngleAxis(45.0f, Vector3.forward) * - direction.normalized;
+        // var newDir2 = new Vector2(newDir.x, newDir.y);
+        // Handles.DrawLine(position+direction, position+direction+newDir2, 1.0f );
+        Handles.DrawLine(position, position+direction, 2.0f);
+        Handles.color = prevColor;
     }
 
  

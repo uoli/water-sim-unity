@@ -55,9 +55,11 @@ Shader "Unlit/FluidSimDebugViz"
     }
 
     static const float PI = 3.1415926535897932384626433;
+    static const float mass = 1;
 
     static const float smoothing_kernel_const = 4 / (PI * pow(_smoothingLength, 8));
     static const float squared_smooth_length = _smoothingLength * _smoothingLength;
+    static const float kernel_derivative_term = -24 / (PI * pow(_smoothingLength, 8));
 
     float SmoothingKernel(float squared_distance)
     {
@@ -69,6 +71,14 @@ Shader "Unlit/FluidSimDebugViz"
         float dif = squared_smooth_length - squared_distance; 
         return dif * dif * dif * smoothing_kernel_const;
     }
+    
+    static float SmoothingKernelDerivative(float dst, float sqrdDistance)
+    {
+        if (sqrdDistance > squared_smooth_length) return 0;
+        float diff = squared_smooth_length - sqrdDistance;
+        
+        return diff*diff *dst * kernel_derivative_term;
+    }
 
     float squaredDistance(float2 a, float2 b)
     {
@@ -79,7 +89,6 @@ Shader "Unlit/FluidSimDebugViz"
     float CalculateDensity(float2 pos)
     {
         float density = 0;
-        float mass = 1;
         for (int i=0; i < _PointCount; i++)
         {
             float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
@@ -94,8 +103,7 @@ Shader "Unlit/FluidSimDebugViz"
 
     float CalculatePressure(float2 pos)
     {
-        float pressure = 0;
-        float mass = 1;
+        float pressure = _min_pressure;
         for (int i=0; i < _PointCount; i++)
         {
             float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
@@ -108,6 +116,26 @@ Shader "Unlit/FluidSimDebugViz"
         }
 
         return pressure;
+    }
+
+    float2 CalculatePressureGradient(float2 pos)
+    {
+        float2 pressureGradient = 0;
+        for (int i = 0; i < _PointCount; i++)
+        {
+            float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
+            float sqrDst = squaredDistance(particlePos,pos );
+            if (sqrDst > squared_smooth_length) continue;
+            float2 dif = particlePos - pos;
+            float dir = normalize(dif);
+            float pressure = _particle_pressures[i];
+            float density = _particle_densities[i];
+            float distance = sqrt(sqrDst);
+            float influence = SmoothingKernelDerivative(distance, sqrDst);
+            pressureGradient += dir * (pressure * mass) / density * influence;
+        }
+
+        return pressureGradient;
     }
 
     float inverseLerp(float min, float max, float val)
@@ -131,14 +159,14 @@ Shader "Unlit/FluidSimDebugViz"
         } else if (_visMode == 1) {
             float prop = CalculatePressure(localPos);
             
-            if (prop < -10)
+            if (prop < 0)
             {
-                float t = inverseLerp(_min_pressure, -10, prop);
+                float t = inverseLerp(_min_pressure, 0, prop);
                 col = lerp(_negativePressureColor,_neutralPressureColor, t);
             }
-            else if (prop > 10)
+            else if (prop > 0)
             {
-                float t = inverseLerp(10, _max_pressure, prop);
+                float t = inverseLerp(0, _max_pressure, prop);
                 col = lerp(_neutralPressureColor,_positivePressureColor, t);
                 //col = _positivePressureColor;
             }
@@ -146,6 +174,11 @@ Shader "Unlit/FluidSimDebugViz"
             {
                 col = _neutralPressureColor;
             }
+            //col = float4(1,prop*_DensityVizFactor,0,1);
+        } else if (_visMode == 2)
+        {
+            float2 prop = CalculatePressureGradient(localPos);
+            col = float4(prop * _DensityVizFactor, 0, 1);
         }
 
         
