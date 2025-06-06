@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using fluid_sim;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Profiling;
@@ -23,6 +24,7 @@ public class FluidSim : MonoBehaviour
     NativeArray<float> m_Density;
     NativeArray<float> m_Pressure;
     NativeArray<Vector2> m_Velocity;
+    GridSpatialLookup m_LookupHelper;
 
     float m_SquaredSmoothingLength;
     float m_KernelTerm;
@@ -48,6 +50,7 @@ public class FluidSim : MonoBehaviour
     void OnDisable()
     {
         CleanupParticles();
+        CleanupSpatialAcceleration();
     }
 
     void CleanupParticles()
@@ -60,6 +63,18 @@ public class FluidSim : MonoBehaviour
             m_Pressure.Dispose();
         if (m_Velocity.IsCreated)
             m_Velocity.Dispose();
+    }
+
+    void CleanupSpatialAcceleration()
+    {
+        if (m_LookupHelper.IsValid)
+            m_LookupHelper.Dispose();
+    }
+
+    void InitializeSpatialAcceleration()
+    {
+        CleanupSpatialAcceleration();
+        m_LookupHelper = new GridSpatialLookup(SmoothingLength, m_ParticleCount);
     }
 
     void InitParticles()
@@ -77,15 +92,27 @@ public class FluidSim : MonoBehaviour
             m_Pressure[i] = 0;
             m_Velocity[i] = Vector2.zero;
         }
+        
+    }
+    
+    void DoReInitializationIfNecessary()
+    {
+        var particleCountDifferent = m_ParticleCount != m_Position.Length;
+        var smoothingRadiusDifferent = m_LookupHelper.IsValid || !Mathf.Approximately(SmoothingLength, m_LookupHelper.CellSize);
+        if (particleCountDifferent)
+        {
+            InitParticles();
+        }
+        if (particleCountDifferent || smoothingRadiusDifferent)
+        {
+            InitializeSpatialAcceleration();
+        }
     }
 
     // Update is called once per frame
     void Update()
     {
-        if (m_ParticleCount != m_Position.Length)
-        {
-            InitParticles();
-        }
+        DoReInitializationIfNecessary();
         
         if (AutoStep)
             DoUpdate();
@@ -94,6 +121,8 @@ public class FluidSim : MonoBehaviour
     public void DoUpdate()
     {
         using var markerScope = s_UpdatePerfMarker.Auto();
+        
+        m_LookupHelper.UpdateParticles(m_Position);
         
         CachePrecomputedValues();
         CalculateParticlesDensity();
@@ -172,8 +201,9 @@ public class FluidSim : MonoBehaviour
         public NativeArray<float> densities;
         [ReadOnly]
         public NativeArray<float> pressures;
-        
         public NativeArray<Vector2> velocities;
+        [ReadOnly]
+        public GridSpatialLookup lookupHelper;
         public float mass;
         public float squaredSmoothingLength;
         public float smoothingLength;
@@ -183,7 +213,7 @@ public class FluidSim : MonoBehaviour
         {
             var position = positions[index];
             var density = densities[index]; 
-            var pressureForce = CalculatePressureGradient(index, mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm,
+            var pressureForce = CalculatePressureGradient(index, lookupHelper, mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm,
                 positions, pressures, densities);
             var pressureAcceleration = pressureForce / density;
             var velocity = pressureAcceleration * deltaTime;
@@ -203,6 +233,7 @@ public class FluidSim : MonoBehaviour
             pressures = m_Pressure,
             velocities = m_Velocity,
             deltaTime = deltaTime,
+            lookupHelper = m_LookupHelper,
             mass = Mass,
             squaredSmoothingLength = m_SquaredSmoothingLength,
             smoothingLength = SmoothingLength,
@@ -241,14 +272,18 @@ public class FluidSim : MonoBehaviour
 
     float CalculateDensity(Vector2 pos)
     {
-        return CalculateDensity(pos, Mass, m_SquaredSmoothingLength, SmoothingLength, m_KernelTerm, m_Position.AsReadOnlySpan());
+        return CalculateDensity(pos, m_LookupHelper, Mass, m_SquaredSmoothingLength, SmoothingLength, m_KernelTerm, m_Position.AsReadOnlySpan());
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static float CalculateDensity(Vector2 pos, float mass, float squaredSmoothingLength, float smoothingLength, float kernelTerm, ReadOnlySpan<Vector2> positions)
+    static float CalculateDensity(Vector2 pos, GridSpatialLookup lookup, float mass, float squaredSmoothingLength, float smoothingLength, float kernelTerm, ReadOnlySpan<Vector2> positions)
     {
+        var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
+        lookup.GetParticlesAround(pos, particleIndices);
+
         var density = 0f;
-        for (var i = 0; i < positions.Length; i++)
+        //for (var i = 0; i < positions.Length; i++)
+        foreach(var i in particleIndices)
         {
             var position = positions[i];
             var sqrDst = Vector2.SqrMagnitude(position - pos);
@@ -256,7 +291,7 @@ public class FluidSim : MonoBehaviour
             var influence = SmoothingKernel2(Mathf.Sqrt(sqrDst), smoothingLength);
             density += mass * influence;
         }
-
+        particleIndices.Dispose();
         return density;
     }
 
@@ -264,6 +299,8 @@ public class FluidSim : MonoBehaviour
     {
         [ReadOnly]
         public NativeArray<Vector2> positions;
+        [ReadOnly]
+        public GridSpatialLookup lookupHelper;
         public float mass;
         public float squaredSmoothingLength;
         public float smoothingLength;
@@ -273,7 +310,7 @@ public class FluidSim : MonoBehaviour
         public NativeArray<float> density;
         public void Execute(int index)
         {
-            density[index] = CalculateDensity(positions[index], mass, squaredSmoothingLength, smoothingLength, kernelTerm, positions.AsReadOnlySpan());
+            density[index] = CalculateDensity(positions[index], lookupHelper, mass, squaredSmoothingLength, smoothingLength, kernelTerm, positions.AsReadOnlySpan());
         }
     }
 
@@ -285,6 +322,7 @@ public class FluidSim : MonoBehaviour
         var job = new CalculateParticlesDensityJobFor()
         {
             positions = m_Position,
+            lookupHelper = m_LookupHelper,
             mass = Mass,
             squaredSmoothingLength = m_SquaredSmoothingLength,
             smoothingLength = SmoothingLength,
@@ -334,11 +372,14 @@ public class FluidSim : MonoBehaviour
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static public Vector2 CalculatePressureGradient(int i, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
+    static public Vector2 CalculatePressureGradient(int i, GridSpatialLookup lookup, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
         ReadOnlySpan<Vector2> position, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density)
     {
+        var particleIndices = new NativeList<int>(position.Length, Allocator.Temp);
+        lookup.GetParticlesAround(position[i], particleIndices);
         var pressureGradient = Vector2.zero;
-        for (var j = 0; j < position.Length; j++)
+        //for (var j = 0; j < position.Length; j++)
+        foreach(var j in particleIndices)
         {
             if (i == j) continue;
             
@@ -351,7 +392,7 @@ public class FluidSim : MonoBehaviour
             var averagedPressure = (pressure[j] + pressure[i]) / 2;
             pressureGradient += dir * (averagedPressure * mass) / density[j] * influence;
         }
-
+        particleIndices.Dispose();
         return pressureGradient;
     }
 
