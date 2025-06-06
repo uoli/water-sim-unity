@@ -120,7 +120,7 @@ Shader "Unlit/FluidSimDebugViz"
 
     float CalculatePressure(float2 pos)
     {
-        float pressure = _min_pressure;
+        float pressure = 0;
         for (int i=0; i < _PointCount; i++)
         {
             float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using Unity.Collections;
 using Unity.Profiling;
 using UnityEditor;
 using UnityEngine;
@@ -23,7 +24,8 @@ public class FluidSimViz : MonoBehaviour
     public Material m_CircleMaterial;
     public Material m_FluidMaterialDebugViz;
     public int m_CircleSize = 10;
-    public bool m_ShowOverlay = false;
+    public bool m_ShowVelocities = false;
+    public bool m_ShowGrid = false;
     public float m_DensityVizFactor = 1;
     public VisualizationMode m_VisualizationMode = VisualizationMode.Density;
     public Color m_NegativePressureColor;
@@ -223,33 +225,89 @@ public class FluidSimViz : MonoBehaviour
         GUI.skin.label.Draw(new Rect(0,0,1000,20), energyContent, 0 );
         
 
-        if (!m_ShowOverlay) return;
+        if (!m_ShowGrid) return;
         var thickness = 1;
-        var topleft = new Vector2(0, 0);
-        var topright = new Vector2(0, m_FluidSim.height * m_ScalingFactor);
-        var bottomleft = new Vector2(m_FluidSim.width*m_ScalingFactor, 0);
-        var bottomright = new Vector2(m_FluidSim.width*m_ScalingFactor, m_FluidSim.height*m_ScalingFactor);
+        // var topleft = new Vector2(0, 0);
+        // var topright = new Vector2(0, m_FluidSim.height * m_ScalingFactor);
+        // var bottomleft = new Vector2(m_FluidSim.width*m_ScalingFactor, 0);
+        // var bottomright = new Vector2(m_FluidSim.width*m_ScalingFactor, m_FluidSim.height*m_ScalingFactor);
         
         //Graphics.DrawTexture(new Rect(0,0, m_FluidSim.width, m_FluidSim.height), m_Texture);
+        var boundaries = new Rect(0, 0, m_FluidSim.width * m_ScalingFactor, m_FluidSim.height * m_ScalingFactor);
+        DrawRect(boundaries, thickness, Color.gray);
+        // DrawLine(topleft,topright, thickness, Color.gray);
+        // DrawLine(topright, bottomright, thickness, Color.gray);
+        // DrawLine(bottomright, bottomleft, thickness, Color.gray);
+        // DrawLine(bottomleft, topleft, thickness, Color.gray);
+        
+        var cellSize = m_FluidSim.m_LookupHelper.CellSize;
+        var cellsHorizontalCount = m_FluidSim.width / cellSize;
+        var cellsVerticalCount = m_FluidSim.height / cellSize;
+        for (int i = 0; i < cellsHorizontalCount; i++)
+        {
+            var x = cellSize * i * m_ScalingFactor;
+            var top = new Vector2(x, 0);
+            var bottom = new Vector2(x, boundaries.yMax);
+            DrawLine(top, bottom, thickness, Color.gray);
+        }
+        for (int i = 0; i < cellsVerticalCount; i++)
+        {
+            var y = cellSize * i * m_ScalingFactor;
+            var top = new Vector2(0, y);
+            var bottom = new Vector2(boundaries.yMax, y);
+            DrawLine(top, bottom, thickness, Color.gray);
+        }
 
-        DrawLine(topleft,topright, thickness, Color.gray);
-        DrawLine(topright, bottomright, thickness, Color.gray);
-        DrawLine(bottomright, bottomleft, thickness, Color.gray);
-        DrawLine(bottomleft, topleft, thickness, Color.gray);
+        var selectedGrid = new Vector2Int(-1, -1);
+        selectedGrid.x = Mathf.FloorToInt(m_MousePos.x / m_ScalingFactor / cellSize);
+        selectedGrid.y = Mathf.FloorToInt(m_MousePos.y / m_ScalingFactor / cellSize);
+        var cellRect = new Rect(
+            selectedGrid.x * cellSize * m_ScalingFactor,
+            selectedGrid.y * cellSize * m_ScalingFactor,
+            cellSize * m_ScalingFactor,
+            cellSize * m_ScalingFactor
+            );
         
+        DrawRect(cellRect, thickness*2, Color.red);
         
+        var particleIndexes = new NativeList<int>(m_FluidSim.m_ParticleCount, Allocator.Temp);
+        m_FluidSim.m_LookupHelper.GetParticlesAround(
+            new Vector2(selectedGrid.x * cellSize + cellSize * 0.5f, selectedGrid.y * cellSize + cellSize * 0.5f),
+            particleIndexes
+            );
+
+        
+        if (!m_ShowVelocities) return;
+
         var positions = m_FluidSim.GetPositions();
         var velocities = m_FluidSim.GetVelocities();
 
         for (var i = 0; i < m_FluidSim.m_ParticleCount; i++)
         {
+            var circleColor = Color.blue;
+            if (particleIndexes.Contains(i))
+                circleColor = Color.red;
             var position = positions[i] * m_ScalingFactor;
             var velocity = velocities[i];
 
-            DrawCircle(position, m_CircleSize * m_ScalingFactor, Color.blue);
+            DrawCircle(position, m_CircleSize * m_ScalingFactor, circleColor);
             DrawArrow(position, velocity, Color.green);
         }
-        
+
+        particleIndexes.Dispose();
+
+    }
+
+    static void DrawRect(Rect rect, float thickness, Color color)
+    {
+        var topLeft = new Vector2(rect.x, rect.y);
+        var topRight = new Vector2(rect.xMax, rect.y);
+        var bottomLeft = new Vector2(rect.x, rect.yMax);
+        var bottomRight = new Vector2(rect.xMax, rect.yMax);
+        DrawLine(topLeft, topRight, thickness, color);
+        DrawLine(topRight, bottomRight, thickness, color);
+        DrawLine(bottomRight, bottomLeft, thickness, color);
+        DrawLine(bottomLeft, topLeft, thickness, color);
     }
 
     static void DrawMaterial(Rect rect, Material mat)
@@ -259,14 +317,20 @@ public class FluidSimViz : MonoBehaviour
 
     void DrawCircle(Vector2 center, float radius, Color color)
     {
+        var originalColor = GUI.color;
+        GUI.color = color;
         var rect = new Rect(center.x - radius , center.y - radius, radius+radius, radius+radius);
-        Graphics.DrawTexture(rect, m_CircleTexture);
+        GUI.DrawTexture(rect, m_CircleTexture);
+        GUI.color = originalColor;
     }
 
-    static void DrawLine(Vector2 start, Vector2 end, int thickness, Color color)
+    static void DrawLine(Vector2 start, Vector2 end, float thickness, Color color)
     {
+        var prevColor = Handles.color;
+        Handles.color = color;
         //var rect = new Rect(0,0, thickness, thickness);
         Handles.DrawLine(start, end, thickness);
+        Handles.color = prevColor;
     }
 
     static void DrawArrow(Vector2 position, Vector2 direction, Color color)

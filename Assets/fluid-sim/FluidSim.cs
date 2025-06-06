@@ -24,7 +24,7 @@ public class FluidSim : MonoBehaviour
     NativeArray<float> m_Density;
     NativeArray<float> m_Pressure;
     NativeArray<Vector2> m_Velocity;
-    GridSpatialLookup m_LookupHelper;
+    internal GridSpatialLookup m_LookupHelper;
 
     float m_SquaredSmoothingLength;
     float m_KernelTerm;
@@ -98,7 +98,7 @@ public class FluidSim : MonoBehaviour
     void DoReInitializationIfNecessary()
     {
         var particleCountDifferent = m_ParticleCount != m_Position.Length;
-        var smoothingRadiusDifferent = m_LookupHelper.IsValid || !Mathf.Approximately(SmoothingLength, m_LookupHelper.CellSize);
+        var smoothingRadiusDifferent = !m_LookupHelper.IsValid || !Mathf.Approximately(SmoothingLength, m_LookupHelper.CellSize);
         if (particleCountDifferent)
         {
             InitParticles();
