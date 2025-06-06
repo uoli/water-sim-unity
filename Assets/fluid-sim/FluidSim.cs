@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Threading.Tasks;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Profiling;
@@ -18,6 +16,7 @@ public class FluidSim : MonoBehaviour
     public float SmoothingLength = 10;
     [Range(0, 1)]
     public float SimulationStep = 0.0001f;
+    public float BoundaryPushStrength = 1;
     public bool AutoStep = true;
     
     NativeArray<Vector2> m_Position;
@@ -110,26 +109,55 @@ public class FluidSim : MonoBehaviour
         public float deltaTime;
         public float width;
         public float height;
+        public float smoothingLength;
+        public float boundaryPushStrength;
         public void Execute(int index)
         {
             var position = positions[index];
             var velocity = velocities[index];
             position += velocity * deltaTime;
-            if (position.x < 0) {
-                position.x = 0;
-                velocity.x *= -0.5f;
+            
+            if (position.x < smoothingLength)
+            {
+                var strength = (smoothingLength - position.x) / smoothingLength;
+                velocity.x += boundaryPushStrength * strength * deltaTime;
+                if (position.x < 0) {
+                    position.x = 0;
+                    velocity.x *= -0.5f;
+                }
             }
-            if (position.y < 0) {
-                position.y = 0;
-                velocity.y *= -0.5f;
+            if (position.y < smoothingLength)
+            {
+                var strength = (smoothingLength - position.y) / smoothingLength;
+                velocity.y += boundaryPushStrength * strength * deltaTime;
+                if (position.y < 0)
+                {
+                    position.y = 0;
+                    velocity.y *= -0.5f;
+                }
             }
-            if (position.x > width) {
-                position.x = width;
-                velocity.x *= -0.5f;
+
+            var distToRightWall = Mathf.Abs(width - position.x);
+            if (distToRightWall < smoothingLength)
+            {
+                var strength = (smoothingLength - distToRightWall) / smoothingLength;
+                velocity.x -= boundaryPushStrength * strength * deltaTime;
+                if (position.x > width)
+                {
+                    position.x = width;
+                    velocity.x *= -0.5f;
+                }
             }
-            if (position.y > height) {
-                position.y = height;
-                velocity.y *= -0.5f;
+            var distToBottomWall = Mathf.Abs(height - position.y);
+            if (distToBottomWall < smoothingLength)
+            {
+                var strength = (smoothingLength - distToBottomWall) / smoothingLength;
+                velocity.y -= boundaryPushStrength * strength * deltaTime;
+                if (position.y > height)
+                {
+                    position.y = height;
+                    velocity.y *= -0.5f;
+                }
             }
             positions[index] = position;
             velocities[index] = velocity;
@@ -155,7 +183,7 @@ public class FluidSim : MonoBehaviour
         {
             var position = positions[index];
             var density = densities[index]; 
-            var pressureForce = CalculatePressureGradient(position, mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm,
+            var pressureForce = CalculatePressureGradient(index, mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm,
                 positions, pressures, densities);
             var pressureAcceleration = pressureForce / density;
             var velocity = pressureAcceleration * deltaTime;
@@ -189,7 +217,9 @@ public class FluidSim : MonoBehaviour
             deltaTime = deltaTime,
             width = width,
             height = height,
-            velocities = m_Velocity
+            velocities = m_Velocity,
+            smoothingLength = SmoothingLength,
+            boundaryPushStrength = BoundaryPushStrength,
         };
         var velocityJobHandle = job.ScheduleParallelByRef(m_Position.Length,
             64, velocityFromPressureJobHandle);
@@ -302,26 +332,24 @@ public class FluidSim : MonoBehaviour
 
         return pressure;
     }
-
-    public Vector2 CalculatePressureGradient(Vector2 pos)
-    {
-        return CalculatePressureGradient(pos, Mass, m_SquaredSmoothingLength, SmoothingLength, m_KernelDerivativeTerm, m_Position, m_Pressure, m_Density);
-    }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static public Vector2 CalculatePressureGradient(Vector2 pos, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
+    static public Vector2 CalculatePressureGradient(int i, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
         ReadOnlySpan<Vector2> position, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density)
     {
         var pressureGradient = Vector2.zero;
-        for (var i = 0; i < position.Length; i++)
+        for (var j = 0; j < position.Length; j++)
         {
-            var dif = position[i] - pos;
+            if (i == j) continue;
+            
+            var dif = position[j] - position[i];
             var dir = dif.normalized;
             var sqrDst = Vector2.SqrMagnitude(dif);
             var distance = Mathf.Sqrt(sqrDst);
             //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
             var influence = SmoothingKernel2Derivative(distance, smoothingLength);
-            pressureGradient += dir * (pressure[i] * mass) / density[i] * influence;
+            var averagedPressure = (pressure[j] + pressure[i]) / 2;
+            pressureGradient += dir * (averagedPressure * mass) / density[j] * influence;
         }
 
         return pressureGradient;
