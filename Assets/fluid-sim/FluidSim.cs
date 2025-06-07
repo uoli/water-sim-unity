@@ -17,7 +17,7 @@ public class FluidSim : MonoBehaviour
     public float Mass = 1;
     public float SmoothingLength = 10;
     public float m_PressureMultiplier = 1;
-    public bool UseAdaptativeSetpTime = false;
+    public bool UseAdaptativeStepTime = false;
     [Range(0, 0.3f)]
     public float SimulationStep = 0.0001f;
     public float BoundaryPushStrength = 1;
@@ -139,9 +139,9 @@ public class FluidSim : MonoBehaviour
         
         CachePrecomputedValues();
         var stepTime = SimulationStep;
-        if (UseAdaptativeSetpTime)
+        if (UseAdaptativeStepTime)
         {
-            stepTime = CalcCFLTimeStep(m_LastStepMaxVelocity);
+            stepTime = Mathf.Min(SimulationStep, CalcCFLTimeStep(m_LastStepMaxVelocity));
         }
         
         JobHandle dependencyJobHandle = default;
@@ -221,7 +221,7 @@ public class FluidSim : MonoBehaviour
             var diff = forceCenter - particlePosition;
             var sqrDistance = diff.sqrMagnitude;
             
-            if (sqrDistance > radius* radius) return Vector2.zero;
+            if (sqrDistance > radius * radius) return Vector2.zero;
             
             var distance = Mathf.Sqrt(sqrDistance);
             var dirToInputPoint = distance <= float.Epsilon ? Vector2.zero : diff/distance;

@@ -208,7 +208,7 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_max_density", maxDensity);
         
         if (m_MousePressed)
-            m_FluidSim.Interact(mouseInSimulationSpace, m_MouseRadius, m_InteractionDirection);
+            m_FluidSim.Interact(mouseInSimulationSpace, m_MouseRadius / m_ScalingFactor, m_InteractionDirection);
         
 
 
