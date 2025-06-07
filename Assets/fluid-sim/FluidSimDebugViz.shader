@@ -170,7 +170,7 @@ Shader "Unlit/FluidSimDebugViz"
         //float2 mouse = float2(_mousex, _mousey);
         float2 normalizedScreenCoord = (i.scrPos.xy / i.scrPos.w); // [0-1] in viewport
         float2 screenPixel = normalizedScreenCoord *  _ScreenParams.xy ;
-        float2 localPos = float2(screenPixel.x, _ScreenParams.y - screenPixel.y) / _scaling_factor;
+        float2 localPos = float2(screenPixel.x,  screenPixel.y - _ScreenParams.y + _sizey * _scaling_factor ) / _scaling_factor;
         //fixed4 col = float4(1, frac(localPos / _ScreenParams.xy) , 1);
         _min_pressure = min(_min_pressure, -1);
 
@@ -198,10 +198,12 @@ Shader "Unlit/FluidSimDebugViz"
             col = lerp(_negativePressureColor,_positivePressureColor, t);
            
             //col = float4(1,prop*_DensityVizFactor,0,1);
-        } else if (_visMode == 2)
-        {
+        } else if (_visMode == 2) {
             float2 prop = CalculatePressureGradient(localPos);
-            col = float4(prop * _DensityVizFactor, 0, 1);
+            col = fixed4(prop * _DensityVizFactor, 0, 1);
+        } else if (_visMode == 3)
+        {
+            col = fixed4(0,0,0,1);
         }
 
         
@@ -217,7 +219,7 @@ Shader "Unlit/FluidSimDebugViz"
         {
             float2 pos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
             
-            if (distance(pos, localPos) <_circleSize)
+            if (distance(pos, localPos) <_circleSize / _scaling_factor)
             {
                 float pressure = _particle_pressures[i];
                 col = float4(0, pressure, 1, 1);

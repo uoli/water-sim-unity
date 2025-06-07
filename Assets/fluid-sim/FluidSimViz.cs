@@ -1,11 +1,8 @@
 using System;
-using System.Collections.Generic;
-using System.Numerics;
 using Unity.Collections;
 using Unity.Profiling;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Serialization;
 using Vector2 = UnityEngine.Vector2;
 using Vector3 = UnityEngine.Vector3;
 
@@ -14,6 +11,7 @@ public enum VisualizationMode
     Density = 0,
     Pressure = 1,
     PressureGradient = 2,
+    NoBackground = 3,
 }
 
 public class FluidSimViz : MonoBehaviour
@@ -21,10 +19,10 @@ public class FluidSimViz : MonoBehaviour
     static readonly int k_ParticlePositions = Shader.PropertyToID("ParticlePositions");
     public float m_ScalingFactor = 1.0f;
     public Texture2D m_CircleTexture;
-    public Material m_CircleMaterial;
     public Material m_FluidMaterialDebugViz;
-    public int m_CircleSize = 10;
+    public float m_CircleSize = 10;
     public bool m_ShowVelocities = false;
+    public float m_velocityScale = 1.0f;
     public bool m_ShowGrid = false;
     public float m_DensityVizFactor = 1;
     public VisualizationMode m_VisualizationMode = VisualizationMode.Density;
@@ -227,7 +225,7 @@ public class FluidSimViz : MonoBehaviour
         
         DrawMaterial(new Rect(0,0, m_FluidSim.width * m_ScalingFactor, m_FluidSim.height * m_ScalingFactor), m_FluidMaterialDebugViz);
         energyContent.text = $"Kinetic Energy: {m_KineticEnergy}";
-        GUI.skin.label.Draw(new Rect(0,0,1000,20), energyContent, 0 );
+        GUI.skin.label.Draw(new Rect(800,0,1000,20), energyContent, 0 );
         
 
         if (!m_ShowGrid) return;
@@ -277,7 +275,9 @@ public class FluidSimViz : MonoBehaviour
         
         var particleIndexes = new NativeList<int>(m_FluidSim.m_ParticleCount, Allocator.Temp);
         m_FluidSim.m_LookupHelper.GetParticlesAround(
-            new Vector2(selectedGrid.x * cellSize + cellSize * 0.5f, selectedGrid.y * cellSize + cellSize * 0.5f),
+            new Vector2(
+                selectedGrid.x * cellSize + cellSize * 0.5f,
+                (cellsHorizontalCount -1 - selectedGrid.y ) * cellSize + cellSize * 0.5f),
             particleIndexes
             );
 
@@ -293,10 +293,12 @@ public class FluidSimViz : MonoBehaviour
             if (particleIndexes.Contains(i))
                 circleColor = Color.red;
             var position = positions[i] * m_ScalingFactor;
+            position.y = m_FluidSim.height* m_ScalingFactor - position.y;
             var velocity = velocities[i];
+            velocity.y *= -1;
 
-            DrawCircle(position, m_CircleSize * m_ScalingFactor, circleColor);
-            DrawArrow(position, velocity, Color.green);
+            DrawCircle(position, m_CircleSize , circleColor);
+            DrawArrow(position, velocity * m_velocityScale, Color.green);
         }
 
         particleIndexes.Dispose();

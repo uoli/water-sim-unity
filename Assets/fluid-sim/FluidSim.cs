@@ -13,12 +13,15 @@ public class FluidSim : MonoBehaviour
 
     public int width;
     public int height;
+    public float Gravity = 9.8f;
     public float Mass = 1;
     public float SmoothingLength = 10;
     public float m_PressureMultiplier = 1;
+    public bool UseAdaptativeSetpTime = false;
     [Range(0, 1)]
     public float SimulationStep = 0.0001f;
     public float BoundaryPushStrength = 1;
+    public float CollisionDamping = 0.5f;
     public bool AutoStep = true;
     
     NativeArray<Vector2> m_Position;
@@ -31,7 +34,8 @@ public class FluidSim : MonoBehaviour
     float m_KernelTerm;
     float m_KernelDerivativeTerm;
     float m_TargetDensity;
-    
+    float m_LastStepMaxVelocity;
+
     static readonly ProfilerMarker s_UpdatePerfMarker = new ProfilerMarker("FluidSim.Update");
     static readonly ProfilerMarker s_StepPerfMarker = new ProfilerMarker("FluidSim.Step");
     static readonly ProfilerMarker s_PressurePerfMarker = new ProfilerMarker("FluidSim.PressureCalc");
@@ -128,7 +132,23 @@ public class FluidSim : MonoBehaviour
         CachePrecomputedValues();
         CalculateParticlesDensity();
         CalculateParticlePressure();
-        SimulateStep(SimulationStep);
+        var stepTime = SimulationStep;
+        if (UseAdaptativeSetpTime)
+        {
+            stepTime = CalcCFLTimeStep(m_LastStepMaxVelocity);
+        }
+        SimulateStep(stepTime);
+    }
+    
+    struct CalculateAccelerationFromGravityJob : IJobFor
+    {
+        public NativeArray<Vector2> velocities;
+        public float deltaTime;
+        public float gravity;
+        public void Execute(int index)
+        {
+            velocities[index] += Vector2.down * gravity * deltaTime;
+        }
     }
     
     struct CalculatePositionFromVelocityJobFor : IJobFor
@@ -141,6 +161,7 @@ public class FluidSim : MonoBehaviour
         public float height;
         public float smoothingLength;
         public float boundaryPushStrength;
+        public float collisionDamping;
         public void Execute(int index)
         {
             var position = positions[index];
@@ -152,8 +173,8 @@ public class FluidSim : MonoBehaviour
                 var strength = (smoothingLength - position.x) / smoothingLength;
                 velocity.x += boundaryPushStrength * strength * deltaTime;
                 if (position.x < 0) {
-                    position.x = 0;
-                    velocity.x *= -0.5f;
+                    position.x = -position.x;
+                    velocity.x *= -collisionDamping;
                 }
             }
             if (position.y < smoothingLength)
@@ -162,8 +183,8 @@ public class FluidSim : MonoBehaviour
                 velocity.y += boundaryPushStrength * strength * deltaTime;
                 if (position.y < 0)
                 {
-                    position.y = 0;
-                    velocity.y *= -0.5f;
+                    position.y = - position.y;
+                    velocity.y *= -collisionDamping;
                 }
             }
 
@@ -174,8 +195,8 @@ public class FluidSim : MonoBehaviour
                 velocity.x -= boundaryPushStrength * strength * deltaTime;
                 if (position.x > width)
                 {
-                    position.x = width;
-                    velocity.x *= -0.5f;
+                    position.x = width - (position.x-width);
+                    velocity.x *= -collisionDamping;
                 }
             }
             var distToBottomWall = Mathf.Abs(height - position.y);
@@ -186,7 +207,7 @@ public class FluidSim : MonoBehaviour
                 if (position.y > height)
                 {
                     position.y = height;
-                    velocity.y *= -0.5f;
+                    velocity.y *= -collisionDamping;
                 }
             }
             positions[index] = position;
@@ -196,13 +217,13 @@ public class FluidSim : MonoBehaviour
     
     struct SetVelocityFromPressureJobFor : IJobFor
     {
+        public NativeArray<Vector2> velocities;
         [ReadOnly]
         public NativeArray<Vector2> positions;
         [ReadOnly]
         public NativeArray<float> densities;
         [ReadOnly]
         public NativeArray<float> pressures;
-        public NativeArray<Vector2> velocities;
         [ReadOnly]
         public GridSpatialLookup lookupHelper;
         public float mass;
@@ -212,7 +233,6 @@ public class FluidSim : MonoBehaviour
         public float deltaTime;
         public void Execute(int index)
         {
-            var position = positions[index];
             var density = densities[index]; 
             var pressureForce = CalculatePressureGradient(index, lookupHelper, mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm,
                 positions, pressures, densities);
@@ -227,6 +247,15 @@ public class FluidSim : MonoBehaviour
         using var markerScope = s_StepPerfMarker.Auto();
         
         JobHandle dependencyJobHandle = default;
+        var gravityJob = new CalculateAccelerationFromGravityJob()
+        {
+            gravity = Gravity,
+            deltaTime = deltaTime,
+            velocities = m_Velocity,
+        };
+        var velocityFromGravityJobHandle = gravityJob.ScheduleParallelByRef(m_Velocity.Length,
+            64, dependencyJobHandle);
+        
         var velocityFromPressureJob = new SetVelocityFromPressureJobFor()
         {
             positions = m_Position,
@@ -241,7 +270,7 @@ public class FluidSim : MonoBehaviour
             kernelDerivativeTerm = m_KernelDerivativeTerm,
         };
         var velocityFromPressureJobHandle = velocityFromPressureJob.ScheduleParallelByRef(m_Position.Length,
-            64, dependencyJobHandle);
+            64, velocityFromGravityJobHandle);
         
         var job = new CalculatePositionFromVelocityJobFor()
         {
@@ -252,28 +281,38 @@ public class FluidSim : MonoBehaviour
             velocities = m_Velocity,
             smoothingLength = SmoothingLength,
             boundaryPushStrength = BoundaryPushStrength,
+            collisionDamping = CollisionDamping,
         };
         var velocityJobHandle = job.ScheduleParallelByRef(m_Position.Length,
             64, velocityFromPressureJobHandle);
         velocityJobHandle.Complete();
+
+        //TODO: this is only needed next frame so this can be backgrounded.
+        m_LastStepMaxVelocity = 0;
+        for (int i = 0; i < m_ParticleCount; i++)
+        {
+            m_LastStepMaxVelocity = Mathf.Max(m_LastStepMaxVelocity, m_Velocity[i].magnitude);
+        }
     }
 
     public float CalcTargetDensity()
     {
         return m_ParticleCount / (float)(width * height);
     }
+
+    float CalcCFLTimeStep(float maxVelocity)
+    {
+        const float courantNumber = 0.3f;
+        const float speedOfSound = 10.0f;
+        return courantNumber * SmoothingLength / (speedOfSound + speedOfSound);
+    }
     
     void CachePrecomputedValues()
     {
         m_SquaredSmoothingLength = SmoothingLength*SmoothingLength;
-        m_KernelTerm = 4 / (Mathf.PI * Mathf.Pow(SmoothingLength, 8));
-        m_KernelDerivativeTerm = -24 / (Mathf.PI * Mathf.Pow(SmoothingLength, 8));
+        m_KernelTerm = SmoothingKernels.CalcSmoothingKernelNormalization(SmoothingLength);
+        m_KernelDerivativeTerm = SmoothingKernels.CalcSmoothingKernelDerivativeNormalization(SmoothingLength);
         m_TargetDensity = CalcTargetDensity();
-    }
-
-    float CalculateDensity(Vector2 pos)
-    {
-        return CalculateDensity(pos, m_LookupHelper, Mass, m_SquaredSmoothingLength, SmoothingLength, m_KernelTerm, m_Position.AsReadOnlySpan());
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -281,15 +320,16 @@ public class FluidSim : MonoBehaviour
     {
         var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
         lookup.GetParticlesAround(pos, particleIndices);
-
+        
         var density = 0f;
         //for (var i = 0; i < positions.Length; i++)
         foreach(var i in particleIndices)
         {
             var position = positions[i];
             var sqrDst = Vector2.SqrMagnitude(position - pos);
+            if (sqrDst > squaredSmoothingLength) continue;
             //var influence = SmoothingKernel(sqrDst, squaredSmoothingLength, kernelTerm);
-            var influence = SmoothingKernel2(Mathf.Sqrt(sqrDst), smoothingLength);
+            var influence = SmoothingKernels.SmoothingKernel2(Mathf.Sqrt(sqrDst), smoothingLength);
             density += mass * influence;
         }
         particleIndices.Dispose();
@@ -360,22 +400,6 @@ public class FluidSim : MonoBehaviour
             m_Pressure[index] = pressure;
         }
     }
-
-    public float CalculatePressure(Vector2 pos)
-    {
-        var pressure = 0f;
-        for (var i = 0; i < m_ParticleCount; i++)
-        {
-            
-            var sqrDst = Vector2.SqrMagnitude(m_Position[i] - pos);
-            var influence = SmoothingKernel2(Mathf.Sqrt(sqrDst), SmoothingLength);
-            //var influence = SmoothingKernel(sqrDst);
-            //var density = CalculateDensity(pos);
-            pressure += m_Pressure[i] * Mass / m_Density[i] * influence;
-        }
-
-        return pressure;
-    }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static public Vector2 CalculatePressureGradient(int i, GridSpatialLookup lookup, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
@@ -394,7 +418,7 @@ public class FluidSim : MonoBehaviour
             var sqrDst = Vector2.SqrMagnitude(dif);
             var distance = Mathf.Sqrt(sqrDst);
             //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
-            var influence = SmoothingKernel2Derivative(distance, smoothingLength);
+            var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
             var averagedPressure = (pressure[j] + pressure[i]) / 2;
             pressureGradient += dir * (averagedPressure * mass) / density[j] * influence;
         }
@@ -402,48 +426,4 @@ public class FluidSim : MonoBehaviour
         return pressureGradient;
     }
 
-    static float SmoothingKernel2(float dst, float radius)
-    {
-        if (dst > radius) return 0;
-
-        float volume = (Mathf.PI * Mathf.Pow(radius, 4)) / 6;
-        return (radius - dst) * (radius - dst) / volume;
-    }
-    
-    static float SmoothingKernel2Derivative(float dst, float radius)
-    {
-        if (dst > radius) return 0;
-
-        float scale = 12 / (Mathf.Pow(radius, 4) * Mathf.PI);
-        return (dst - radius ) * scale;
-    }
-
-    float SmoothingKernelDerivative(float dst, float sqrdDistance)
-    {
-        return SmoothingKernelDerivative(dst, sqrdDistance, m_SquaredSmoothingLength, m_KernelDerivativeTerm);
-    }
-    
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static float SmoothingKernelDerivative(float dst, float sqrdDistance, float squaredSmoothingLength, float kernelDerivativeTerm)
-    {
-        if (sqrdDistance > squaredSmoothingLength) return 0;
-        var diff = squaredSmoothingLength - sqrdDistance;
-        
-        return diff*diff *dst * kernelDerivativeTerm;
-    }
-
-    float SmoothingKernel(float sqrdDistance)
-    {
-        return SmoothingKernel(sqrdDistance, m_SquaredSmoothingLength, m_KernelTerm);
-    }
-    
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static float SmoothingKernel(float sqrdDistance, float squaredSmoothingLength, float kernelTerm)
-    {
-        if (sqrdDistance > squaredSmoothingLength) return 0;
-        //var term = 4 / (Mathf.PI * Mathf.Pow(smoothingFactor, 8));
-        var diff = squaredSmoothingLength - sqrdDistance;
-        //return 315f / (64f * Mathf.PI * Mathf.Pow(smoothingFactor,9)) * Mathf.Pow(smoothingFactor*smoothingFactor - distance*distance, 3);
-        return diff*diff*diff * kernelTerm;
-    }
 }
