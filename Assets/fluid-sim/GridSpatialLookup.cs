@@ -112,7 +112,6 @@ namespace fluid_sim
             foreach (var cellOffset in m_LookupKernel)
             {
                 var cell = centralCell + cellOffset;
-                if(cell.x <0 || cell.y < 0) continue;
                 var cellKey = CellPositionToKey(cell);
                 //do the lookup
                 var lookupStart = m_StartIndices[cellKey];

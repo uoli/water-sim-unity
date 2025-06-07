@@ -25,6 +25,7 @@ public class FluidSim : MonoBehaviour
     public bool AutoStep = true;
     
     NativeArray<Vector2> m_Position;
+    NativeArray<Vector2> m_PredictedPosition;
     NativeArray<float> m_Density;
     NativeArray<float> m_Pressure;
     NativeArray<Vector2> m_Velocity;
@@ -68,6 +69,8 @@ public class FluidSim : MonoBehaviour
             m_Pressure.Dispose();
         if (m_Velocity.IsCreated)
             m_Velocity.Dispose();
+        if(m_PredictedPosition.IsCreated)
+            m_PredictedPosition.Dispose();
     }
 
     void CleanupSpatialAcceleration()
@@ -86,6 +89,7 @@ public class FluidSim : MonoBehaviour
     {
         CleanupParticles();
         m_Position = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
+        m_PredictedPosition = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
         m_Density = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
         m_Pressure = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
         m_Velocity = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
@@ -93,6 +97,7 @@ public class FluidSim : MonoBehaviour
         {
             var position = new Vector2(Random.Range(0f, width), Random.Range(0f, height));
             m_Position[i] = position;
+            m_PredictedPosition[i] = position;
             m_Density[i] = 0;
             m_Pressure[i] = 0;
             m_Velocity[i] = Vector2.zero;
@@ -127,17 +132,46 @@ public class FluidSim : MonoBehaviour
     {
         using var markerScope = s_UpdatePerfMarker.Auto();
         
-        m_LookupHelper.UpdateParticles(m_Position);
-        
         CachePrecomputedValues();
-        CalculateParticlesDensity();
-        CalculateParticlePressure();
         var stepTime = SimulationStep;
         if (UseAdaptativeSetpTime)
         {
             stepTime = CalcCFLTimeStep(m_LastStepMaxVelocity);
         }
+        
+        JobHandle dependencyJobHandle = default;
+
+        var predictPositionJob = new PredictPositionJob
+        {
+            positions = m_Position,
+            velocities = m_Velocity,
+            predictedPositions = m_PredictedPosition,
+            deltaTime = stepTime,
+        };
+        var predictPositionJobHandle = predictPositionJob.ScheduleParallelByRef(m_PredictedPosition.Length,
+            64, dependencyJobHandle);
+        predictPositionJobHandle.Complete();
+        
+        m_LookupHelper.UpdateParticles(m_PredictedPosition);
+        
+        
+        CalculateParticlesDensity();
+        CalculateParticlePressure();
         SimulateStep(stepTime);
+    }
+    
+    struct PredictPositionJob : IJobFor
+    {
+        [ReadOnly]
+        public NativeArray<Vector2> velocities;
+        [ReadOnly]
+        public NativeArray<Vector2> positions;
+        public NativeArray<Vector2> predictedPositions;
+        public float deltaTime;
+        public void Execute(int index)
+        {
+            predictedPositions[index] = positions[index] + velocities[index] * deltaTime;
+        }
     }
     
     struct CalculateAccelerationFromGravityJob : IJobFor
@@ -258,7 +292,7 @@ public class FluidSim : MonoBehaviour
         
         var velocityFromPressureJob = new SetVelocityFromPressureJobFor()
         {
-            positions = m_Position,
+            positions = m_PredictedPosition,
             densities = m_Density,
             pressures = m_Pressure,
             velocities = m_Velocity,
@@ -342,13 +376,13 @@ public class FluidSim : MonoBehaviour
         public NativeArray<Vector2> positions;
         [ReadOnly]
         public GridSpatialLookup lookupHelper;
+        public NativeArray<float> density;
+
         public float mass;
         public float squaredSmoothingLength;
         public float smoothingLength;
-        public float kernelTerm;
+        public float kernelTerm; 
         
-        [WriteOnly]
-        public NativeArray<float> density;
         public void Execute(int index)
         {
             density[index] = CalculateDensity(positions[index], lookupHelper, mass, squaredSmoothingLength, smoothingLength, kernelTerm, positions.AsReadOnlySpan());
@@ -362,7 +396,7 @@ public class FluidSim : MonoBehaviour
         JobHandle dependencyJobHandle = default;
         var job = new CalculateParticlesDensityJobFor()
         {
-            positions = m_Position,
+            positions = m_PredictedPosition,
             lookupHelper = m_LookupHelper,
             mass = Mass,
             squaredSmoothingLength = m_SquaredSmoothingLength,
