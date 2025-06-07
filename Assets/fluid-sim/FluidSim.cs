@@ -1,6 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
-using fluid_sim;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Profiling;
@@ -177,6 +177,7 @@ public class FluidSim : MonoBehaviour
         m_InteractionDirection = direction;
     }
     
+    [BurstCompile]
     struct PredictPositionJob : IJobFor
     {
         [ReadOnly]
@@ -191,6 +192,7 @@ public class FluidSim : MonoBehaviour
         }
     }
     
+    [BurstCompile]
     struct CalculateAccelerationFromExternalForcesJob : IJobFor
     {
         [ReadOnly]
@@ -229,6 +231,7 @@ public class FluidSim : MonoBehaviour
         }
     }
     
+    [BurstCompile]
     struct CalculatePositionFromVelocityJobFor : IJobFor
     {
         public NativeArray<Vector2> positions;
@@ -293,6 +296,7 @@ public class FluidSim : MonoBehaviour
         }
     }
     
+    [BurstCompile]
     struct SetVelocityFromPressureJobFor : IJobFor
     {
         public NativeArray<Vector2> velocities;
@@ -320,6 +324,7 @@ public class FluidSim : MonoBehaviour
         }
     }
     
+    [BurstCompile]
     struct CalculateViscosityForceJob : IJobFor
     {
         public NativeArray<Vector2> velocities;
@@ -460,6 +465,7 @@ public class FluidSim : MonoBehaviour
         return density;
     }
 
+    [BurstCompile]
     struct CalculateParticlesDensityJobFor : IJobFor
     {
         [ReadOnly]
