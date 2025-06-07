@@ -18,11 +18,13 @@ public class FluidSim : MonoBehaviour
     public float SmoothingLength = 10;
     public float m_PressureMultiplier = 1;
     public bool UseAdaptativeSetpTime = false;
-    [Range(0, 1)]
+    [Range(0, 0.3f)]
     public float SimulationStep = 0.0001f;
     public float BoundaryPushStrength = 1;
     public float CollisionDamping = 0.5f;
     public bool AutoStep = true;
+    public float ViscosityFactor = 0.5f;
+    public float m_InteractionStrength;
     
     NativeArray<Vector2> m_Position;
     NativeArray<Vector2> m_PredictedPosition;
@@ -34,8 +36,11 @@ public class FluidSim : MonoBehaviour
     float m_SquaredSmoothingLength;
     float m_KernelTerm;
     float m_KernelDerivativeTerm;
-    float m_TargetDensity;
+    public float m_TargetDensity;
     float m_LastStepMaxVelocity;
+    Vector2 m_MousePosition;
+    float m_MouseRadius;
+    InteractionDirection m_InteractionDirection;
 
     static readonly ProfilerMarker s_UpdatePerfMarker = new ProfilerMarker("FluidSim.Update");
     static readonly ProfilerMarker s_StepPerfMarker = new ProfilerMarker("FluidSim.Step");
@@ -158,6 +163,19 @@ public class FluidSim : MonoBehaviour
         CalculateParticlesDensity();
         CalculateParticlePressure();
         SimulateStep(stepTime);
+        m_MouseRadius = 0; //clear mouse interaction
+    }
+
+    public enum InteractionDirection
+    {
+        Attract,
+        Repel
+    }
+    public void Interact(Vector2 position, float radius, InteractionDirection direction)
+    {
+        m_MousePosition = position;
+        m_MouseRadius = radius;
+        m_InteractionDirection = direction;
     }
     
     struct PredictPositionJob : IJobFor
@@ -174,14 +192,41 @@ public class FluidSim : MonoBehaviour
         }
     }
     
-    struct CalculateAccelerationFromGravityJob : IJobFor
+    struct CalculateAccelerationFromExternalForcesJob : IJobFor
     {
+        [ReadOnly]
+        public NativeArray<Vector2> positions;
         public NativeArray<Vector2> velocities;
         public float deltaTime;
         public float gravity;
+        
+        public Vector2 forceCenter;
+        public float forceRadius;
+        public float forceStrength;
+        
         public void Execute(int index)
         {
-            velocities[index] += Vector2.down * gravity * deltaTime;
+            var position = positions[index];
+            var velocity = velocities[index];
+            var interactionForce = Vector2.zero;
+            
+            if (forceRadius > 0)
+                interactionForce = InteractionForce(position, velocity, forceCenter, forceRadius, forceStrength);
+            
+            velocities[index] += (Vector2.down * gravity + interactionForce) * deltaTime;
+        }
+        
+        static Vector2 InteractionForce(Vector2 particlePosition, Vector2 particleVelocity, Vector2 forceCenter, float radius, float strength)
+        {
+            var diff = forceCenter - particlePosition;
+            var sqrDistance = diff.sqrMagnitude;
+            
+            if (sqrDistance > radius* radius) return Vector2.zero;
+            
+            var distance = Mathf.Sqrt(sqrDistance);
+            var dirToInputPoint = distance <= float.Epsilon ? Vector2.zero : diff/distance;
+            var centerT = 1 - distance / radius;
+            return  (dirToInputPoint * strength - particleVelocity) * centerT;
         }
     }
     
@@ -275,17 +320,48 @@ public class FluidSim : MonoBehaviour
             velocities[index] += velocity;
         }
     }
+    
+    struct CalculateViscosityForceJob : IJobFor
+    {
+        public NativeArray<Vector2> velocities;
+        [ReadOnly]
+        public NativeArray<Vector2> positions;
+        [ReadOnly]
+        public NativeArray<float> densities;
+        [ReadOnly]
+        public GridSpatialLookup lookupHelper;
+        public float mass;
+        public float smoothingLength;
+        public float squaredSmoothingLength;
+
+        public float viscosityFactor;
+        public float deltaTime;
+        public void Execute(int index)
+        {
+            var density = densities[index]; 
+            var viscosityForce = CalculateViscosityForce(index, lookupHelper, mass, smoothingLength, squaredSmoothingLength, viscosityFactor,
+                positions, velocities, densities);
+            var viscosityAcceleration = viscosityForce / density;
+            var velocity = viscosityAcceleration * deltaTime;
+            velocities[index] += velocity;
+        }
+    }
 
     void SimulateStep(float deltaTime)
     {
         using var markerScope = s_StepPerfMarker.Auto();
         
+        var strengthSign = m_InteractionDirection == InteractionDirection.Attract ? 1 : -1;
         JobHandle dependencyJobHandle = default;
-        var gravityJob = new CalculateAccelerationFromGravityJob()
+        var gravityJob = new CalculateAccelerationFromExternalForcesJob()
         {
+            positions = m_PredictedPosition,
+            velocities = m_Velocity,
             gravity = Gravity,
             deltaTime = deltaTime,
-            velocities = m_Velocity,
+            forceCenter = m_MousePosition,
+            forceRadius = m_MouseRadius,
+            forceStrength = m_InteractionStrength * strengthSign,
         };
         var velocityFromGravityJobHandle = gravityJob.ScheduleParallelByRef(m_Velocity.Length,
             64, dependencyJobHandle);
@@ -305,6 +381,21 @@ public class FluidSim : MonoBehaviour
         };
         var velocityFromPressureJobHandle = velocityFromPressureJob.ScheduleParallelByRef(m_Position.Length,
             64, velocityFromGravityJobHandle);
+
+        var viscosityJob = new CalculateViscosityForceJob()
+        {
+            positions = m_PredictedPosition,
+            densities = m_Density,
+            velocities = m_Velocity,
+            deltaTime = deltaTime,
+            lookupHelper = m_LookupHelper,
+            mass = Mass,
+            smoothingLength = SmoothingLength,
+            squaredSmoothingLength = m_SquaredSmoothingLength,
+            viscosityFactor = ViscosityFactor,
+        };
+        var viscosityJobHandle = viscosityJob.ScheduleParallelByRef(m_Position.Length,
+            64, velocityFromPressureJobHandle);
         
         var job = new CalculatePositionFromVelocityJobFor()
         {
@@ -318,7 +409,7 @@ public class FluidSim : MonoBehaviour
             collisionDamping = CollisionDamping,
         };
         var velocityJobHandle = job.ScheduleParallelByRef(m_Position.Length,
-            64, velocityFromPressureJobHandle);
+            64, viscosityJobHandle);
         velocityJobHandle.Complete();
 
         //TODO: this is only needed next frame so this can be backgrounded.
@@ -346,7 +437,7 @@ public class FluidSim : MonoBehaviour
         m_SquaredSmoothingLength = SmoothingLength*SmoothingLength;
         m_KernelTerm = SmoothingKernels.CalcSmoothingKernelNormalization(SmoothingLength);
         m_KernelDerivativeTerm = SmoothingKernels.CalcSmoothingKernelDerivativeNormalization(SmoothingLength);
-        m_TargetDensity = CalcTargetDensity();
+        //m_TargetDensity = CalcTargetDensity();
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -404,10 +495,10 @@ public class FluidSim : MonoBehaviour
             kernelTerm = m_KernelTerm,
             density = m_Density,
         };
-        var velocityJobHandle = job.ScheduleParallelByRef(m_Position.Length,
+        var jobHandle = job.ScheduleParallelByRef(m_Position.Length,
             64, dependencyJobHandle);
         
-        velocityJobHandle.Complete();
+        jobHandle.Complete();
 
         // Parallel.For(0, m_ParticleCount, index =>
         // {
@@ -436,7 +527,7 @@ public class FluidSim : MonoBehaviour
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static public Vector2 CalculatePressureGradient(int i, GridSpatialLookup lookup, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
+    static Vector2 CalculatePressureGradient(int i, GridSpatialLookup lookup, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
         ReadOnlySpan<Vector2> position, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density)
     {
         var particleIndices = new NativeList<int>(position.Length, Allocator.Temp);
@@ -450,6 +541,7 @@ public class FluidSim : MonoBehaviour
             var dif = position[j] - position[i];
             var dir = dif.normalized;
             var sqrDst = Vector2.SqrMagnitude(dif);
+            if (sqrDst > squaredSmoothingLength) continue; 
             var distance = Mathf.Sqrt(sqrDst);
             //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
             var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
@@ -459,5 +551,32 @@ public class FluidSim : MonoBehaviour
         particleIndices.Dispose();
         return pressureGradient;
     }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static Vector2 CalculateViscosityForce(int i, GridSpatialLookup lookup, float mass, float smoothingLength, float squaredSmoothingLength, float viscosityFactor,
+        ReadOnlySpan<Vector2> position, ReadOnlySpan<Vector2> velocity, ReadOnlySpan<float> density)
+    {
+        var particleIndices = new NativeList<int>(position.Length, Allocator.Temp);
+        lookup.GetParticlesAround(position[i], particleIndices);
+        var viscosity = Vector2.zero;
+        //for (var j = 0; j < position.Length; j++)
+        foreach(var j in particleIndices)
+        {
+            if (i == j) continue;
+            
+            var dif = position[j] - position[i];
+            var sqrDst = Vector2.SqrMagnitude(dif);
+            if (sqrDst > squaredSmoothingLength) continue;
+            
+            var velDif = velocity[j] - velocity[i];
+            var distance = Mathf.Sqrt(sqrDst);
+            //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
+            var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
+            viscosity +=  velDif * viscosityFactor * mass / density[j] * influence;
+        }
+        particleIndices.Dispose();
+        return viscosity;
+    }
+    
 
 }

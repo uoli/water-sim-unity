@@ -33,6 +33,8 @@ Shader "Unlit/FluidSimDebugViz"
     float _sizey;
     float _mousex;
     float _mousey;
+    int _mousepressed;
+    float _mouseradius;
     float _smoothingLength;
     float _DensityVizFactor;
     float _circleSize;
@@ -167,7 +169,7 @@ Shader "Unlit/FluidSimDebugViz"
     fixed4 frag (v2f i) : SV_Target
     {
         //float2 size = float2(_sizex, _sizey);
-        //float2 mouse = float2(_mousex, _mousey);
+        float2 mouse = float2(_mousex, _mousey);
         float2 normalizedScreenCoord = (i.scrPos.xy / i.scrPos.w); // [0-1] in viewport
         float2 screenPixel = normalizedScreenCoord *  _ScreenParams.xy ;
         float2 localPos = float2(screenPixel.x,  screenPixel.y - _ScreenParams.y + _sizey * _scaling_factor ) / _scaling_factor;
@@ -208,11 +210,14 @@ Shader "Unlit/FluidSimDebugViz"
 
         
 
-        // float2 pos = mouse;
-        // if (distance(pos, localPos) <100)
-        // {
-        //     col.b = 1;
-        // }
+        if (_mousepressed)
+        {
+            float2 pos = mouse;
+            if (distance(pos, localPos) < _mouseradius / _scaling_factor)
+            {
+                col.b = 1;
+            }
+        }
         
 
         for (int i = 0; i < _PointCount; i++)

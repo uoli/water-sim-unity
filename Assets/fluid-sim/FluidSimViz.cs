@@ -29,6 +29,7 @@ public class FluidSimViz : MonoBehaviour
     public Color m_NegativePressureColor;
     public Color m_NeutralPressureColor;
     public Color m_PositivePressureColor;
+    public float m_MouseRadius = 1.0f;
     
     FluidSim m_FluidSim;
     
@@ -46,6 +47,11 @@ public class FluidSimViz : MonoBehaviour
 
     float m_KineticEnergy = 0;
     
+    Vector2 m_MousePos = Vector2.zero;
+    GUIContent energyContent = new GUIContent();
+    bool m_MousePressed = false;
+    FluidSim.InteractionDirection m_InteractionDirection;
+
     static readonly ProfilerMarker s_UpdatePerfMarker = new ProfilerMarker("FluidSimViz.Update");
     static readonly ProfilerMarker s_OnGuiPerfMarker = new ProfilerMarker("FluidSimViz.OnGUi");
     
@@ -180,10 +186,15 @@ public class FluidSimViz : MonoBehaviour
 
         m_FluidMaterialDebugViz.SetFloat("_scaling_factor", m_ScalingFactor);
 
+        var mouseInSimulationSpace = new Vector2(m_MousePos.x / m_ScalingFactor,
+        m_FluidSim.height - m_MousePos.y / m_ScalingFactor);
+
         m_FluidMaterialDebugViz.SetFloat("_sizex", m_FluidSim.width);
         m_FluidMaterialDebugViz.SetFloat("_sizey", m_FluidSim.height);
-        m_FluidMaterialDebugViz.SetFloat("_mousex", m_MousePos.x);
-        m_FluidMaterialDebugViz.SetFloat("_mousey", m_MousePos.y);
+        m_FluidMaterialDebugViz.SetFloat("_mousex", mouseInSimulationSpace.x);
+        m_FluidMaterialDebugViz.SetFloat("_mousey", mouseInSimulationSpace.y);
+        m_FluidMaterialDebugViz.SetInt("_mousepressed", m_MousePressed ? 1 :0);
+        m_FluidMaterialDebugViz.SetFloat("_mouseradius", m_MouseRadius);
         m_FluidMaterialDebugViz.SetFloat("_smoothingLength", m_FluidSim.SmoothingLength);
         m_FluidMaterialDebugViz.SetFloat("_DensityVizFactor", m_DensityVizFactor);
         m_FluidMaterialDebugViz.SetFloat("_circleSize", m_CircleSize);
@@ -195,6 +206,9 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_min_pressure", minPressure);
         m_FluidMaterialDebugViz.SetFloat("_target_density", m_FluidSim.CalcTargetDensity());
         m_FluidMaterialDebugViz.SetFloat("_max_density", maxDensity);
+        
+        if (m_MousePressed)
+            m_FluidSim.Interact(mouseInSimulationSpace, m_MouseRadius, m_InteractionDirection);
         
 
 
@@ -208,15 +222,24 @@ public class FluidSimViz : MonoBehaviour
     }
     
 
-    Vector2 m_MousePos = Vector2.zero;
-    GUIContent energyContent = new GUIContent();
     void OnGUI()
     {
         using var markerScope = s_OnGuiPerfMarker.Auto();
         
-        if (Event.current.type == EventType.MouseDown)
+        if (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag)
         {
             m_MousePos = Event.current.mousePosition;
+            m_MousePressed = true;
+            m_InteractionDirection = FluidSim.InteractionDirection.Attract;
+            if (Event.current.button == 1)
+            {
+                m_InteractionDirection = FluidSim.InteractionDirection.Repel;
+            }
+        }
+
+        if (Event.current.type == EventType.MouseUp)
+        {
+            m_MousePressed = false;
         }
         
         
