@@ -641,12 +641,13 @@ MonoBehaviour:
   m_CircleSize: 1
   m_ShowVelocities: 0
   m_velocityScale: 1
-  m_ShowGrid: 1
+  m_ShowGrid: 0
   m_DensityVizFactor: 57.4
   m_VisualizationMode: 0
   m_NegativePressureColor: {r: 0, g: 0.09055519, b: 0.53333336, a: 0}
   m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
   m_PositivePressureColor: {r: 0.735849, g: 0, b: 0, a: 0}
+  m_MouseRadius: 20
 --- !u!114 &2014640969
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -659,17 +660,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 605d4fe371862ae4da086394dbdab1ad, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_ParticleCount: 500
+  m_ParticleCount: 1500
   width: 100
   height: 100
-  Gravity: 0
+  Gravity: 9
   Mass: 1
-  SmoothingLength: 5.8137765
-  m_PressureMultiplier: 1
+  SmoothingLength: 7.1
+  m_PressureMultiplier: 5051.1
   UseAdaptativeSetpTime: 0
-  SimulationStep: 0.01
+  SimulationStep: 0.03
   BoundaryPushStrength: 0
+  CollisionDamping: 0.5
   AutoStep: 1
+  ViscosityFactor: -5
+  m_InteractionStrength: 100
+  m_TargetDensity: 0.18
 --- !u!4 &2014640970
 Transform:
   m_ObjectHideFlags: 0
