@@ -159,7 +159,6 @@ public class FluidSim : MonoBehaviour
         
         m_LookupHelper.UpdateParticles(m_PredictedPosition);
         
-        
         CalculateParticlesDensity();
         CalculateParticlePressure();
         SimulateStep(stepTime);
@@ -429,19 +428,19 @@ public class FluidSim : MonoBehaviour
     {
         const float courantNumber = 0.3f;
         const float speedOfSound = 10.0f;
-        return courantNumber * SmoothingLength / (speedOfSound + speedOfSound);
+        return courantNumber * SmoothingLength / (speedOfSound + maxVelocity);
     }
     
     void CachePrecomputedValues()
     {
         m_SquaredSmoothingLength = SmoothingLength*SmoothingLength;
-        m_KernelTerm = SmoothingKernels.CalcSmoothingKernelNormalization(SmoothingLength);
+        m_KernelTerm = SmoothingKernels.CalcSmoothingKernel2Factor(SmoothingLength);
         m_KernelDerivativeTerm = SmoothingKernels.CalcSmoothingKernelDerivativeNormalization(SmoothingLength);
         //m_TargetDensity = CalcTargetDensity();
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static float CalculateDensity(Vector2 pos, GridSpatialLookup lookup, float mass, float squaredSmoothingLength, float smoothingLength, float kernelTerm, ReadOnlySpan<Vector2> positions)
+    static float CalculateDensity(Vector2 pos, GridSpatialLookup lookup, float mass, float squaredSmoothingLength, float smoothingLength, float precalculatedKernelFactor, ReadOnlySpan<Vector2> positions)
     {
         var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
         lookup.GetParticlesAround(pos, particleIndices);
@@ -454,7 +453,7 @@ public class FluidSim : MonoBehaviour
             var sqrDst = Vector2.SqrMagnitude(position - pos);
             if (sqrDst > squaredSmoothingLength) continue;
             //var influence = SmoothingKernel(sqrDst, squaredSmoothingLength, kernelTerm);
-            var influence = SmoothingKernels.SmoothingKernel2(Mathf.Sqrt(sqrDst), smoothingLength);
+            var influence = SmoothingKernels.SmoothingKernel2(Mathf.Sqrt(sqrDst), smoothingLength, precalculatedKernelFactor);
             density += mass * influence;
         }
         particleIndices.Dispose();
@@ -472,11 +471,11 @@ public class FluidSim : MonoBehaviour
         public float mass;
         public float squaredSmoothingLength;
         public float smoothingLength;
-        public float kernelTerm; 
+        public float precalculatedKernelFactor; 
         
         public void Execute(int index)
         {
-            density[index] = CalculateDensity(positions[index], lookupHelper, mass, squaredSmoothingLength, smoothingLength, kernelTerm, positions.AsReadOnlySpan());
+            density[index] = CalculateDensity(positions[index], lookupHelper, mass, squaredSmoothingLength, smoothingLength, precalculatedKernelFactor, positions.AsReadOnlySpan());
         }
     }
 
@@ -492,7 +491,7 @@ public class FluidSim : MonoBehaviour
             mass = Mass,
             squaredSmoothingLength = m_SquaredSmoothingLength,
             smoothingLength = SmoothingLength,
-            kernelTerm = m_KernelTerm,
+            precalculatedKernelFactor = m_KernelTerm,
             density = m_Density,
         };
         var jobHandle = job.ScheduleParallelByRef(m_Position.Length,

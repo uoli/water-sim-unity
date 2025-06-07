@@ -16,14 +16,13 @@ public enum VisualizationMode
 
 public class FluidSimViz : MonoBehaviour
 {
-    static readonly int k_ParticlePositions = Shader.PropertyToID("ParticlePositions");
     public float m_ScalingFactor = 1.0f;
     public Texture2D m_CircleTexture;
     public Material m_FluidMaterialDebugViz;
     public float m_CircleSize = 10;
     public bool m_ShowVelocities = false;
-    public float m_velocityScale = 1.0f;
     public bool m_ShowGrid = false;
+    public float m_velocityScale = 1.0f;
     public float m_DensityVizFactor = 1;
     public VisualizationMode m_VisualizationMode = VisualizationMode.Density;
     public Color m_NegativePressureColor;
@@ -32,9 +31,6 @@ public class FluidSimViz : MonoBehaviour
     public float m_MouseRadius = 1.0f;
     
     FluidSim m_FluidSim;
-    
-    Texture2D m_Texture;
-    Mesh m_Mesh;
     
     float[] m_PointPositionData;
     float[] m_PointDensitiesData;
@@ -46,9 +42,9 @@ public class FluidSimViz : MonoBehaviour
     ComputeBuffer m_PointVelocityBuffer;
 
     float m_KineticEnergy = 0;
+    GUIContent energyContent = new GUIContent();
     
     Vector2 m_MousePos = Vector2.zero;
-    GUIContent energyContent = new GUIContent();
     bool m_MousePressed = false;
     FluidSim.InteractionDirection m_InteractionDirection;
 
@@ -58,10 +54,6 @@ public class FluidSimViz : MonoBehaviour
     void Start()
     {
         m_FluidSim = GetComponent<FluidSim>();
-        InitTexture(); 
-        m_Mesh = new Mesh();
-        m_Mesh.SetVertices(new Vector3[]{new (0, 0), new (0, -1), new (1, -1), new (1, 0)});
-        m_Mesh.SetIndices(new int[]{0, 2, 1, 0, 3, 2}, MeshTopology.Triangles, 0);
     }
 
     void OnDisable()
@@ -69,23 +61,7 @@ public class FluidSimViz : MonoBehaviour
         CleanupComputeBuffers();  
     }
 
-    void OnDestroy()
-    {
-        CleanupTexture();
-        Destroy(m_Mesh);
-    }
-
-    void CleanupTexture()
-    {
-        if (m_Texture != null) 
-            Destroy(m_Texture);
-    }
-
-    void InitTexture()
-    {
-        CleanupTexture();
-        m_Texture = new Texture2D(m_FluidSim.width, m_FluidSim.height);
-    }
+    void OnDestroy() {}
 
     void CleanupComputeBuffers()
     {
@@ -103,26 +79,6 @@ public class FluidSimViz : MonoBehaviour
     void Update()
     {
         using var markerScope = s_UpdatePerfMarker.Auto();
-        if (m_FluidSim.width != m_Texture.width || m_FluidSim.height != m_Texture.height)
-        {
-            InitTexture();
-        }
-        
-        //var particles = m_FluidSim.GetParticles();
-        // var colors = new Color[m_Texture.width * m_Texture.height];
-        // for (var x = 0; x < m_Texture.width; x++)
-        // {
-        //     for (var y = 0; y < m_Texture.height; y++)
-        //     {
-        //         //var color = new Color(x / (float)m_Texture.width, y / (float)m_Texture.height, 0f,1f);
-        //         var density = m_FluidSim.CalculateDensity(new Vector2(x,m_Texture.height-y));
-        //         var color = new Color(density, 0f, 0f,1f);
-        //         colors[y * m_Texture.width + x] = color;
-        //         //Debug.Log(colors[y * m_Texture.width + x]);
-        //     }
-        // }
-        // m_Texture.SetPixels(colors);
-        // m_Texture.Apply();
 
         if (m_PointBuffer == null || m_PointDensitiesBuffer.count != m_FluidSim.m_ParticleCount)
         {
@@ -209,16 +165,6 @@ public class FluidSimViz : MonoBehaviour
         
         if (m_MousePressed)
             m_FluidSim.Interact(mouseInSimulationSpace, m_MouseRadius / m_ScalingFactor, m_InteractionDirection);
-        
-
-
-        //This code is shit, all I wanted is to draw something screen space, I tried using CommandBuffers, but somethings I needed were not compatible with SRP
-        // var worldPoint = Camera.main.ScreenToWorldPoint(new Vector3(0, Camera.main.pixelHeight-1, 1));
-        // var worldPointE = Camera.main.ScreenToWorldPoint(new Vector3(Camera.main.pixelWidth-1, 0, 1));
-        // var meshWidth = m_FluidSim.width / (float)Camera.main.pixelWidth * (float)(worldPointE.x - worldPoint.x);
-        // var meshHeight = m_FluidSim.height / (float)Camera.main.pixelHeight* (float)(worldPoint.y - worldPointE.y);
-        // var matrix = Matrix4x4.TRS(worldPoint, Camera.main.transform.rotation, new Vector3(meshWidth, meshHeight, 1));
-        // Graphics.DrawMesh(m_Mesh, matrix, m_FluidMaterialDebugViz,0);
     }
     
 
@@ -258,7 +204,6 @@ public class FluidSimViz : MonoBehaviour
         // var bottomleft = new Vector2(m_FluidSim.width*m_ScalingFactor, 0);
         // var bottomright = new Vector2(m_FluidSim.width*m_ScalingFactor, m_FluidSim.height*m_ScalingFactor);
         
-        //Graphics.DrawTexture(new Rect(0,0, m_FluidSim.width, m_FluidSim.height), m_Texture);
         var boundaries = new Rect(0, 0, m_FluidSim.width * m_ScalingFactor, m_FluidSim.height * m_ScalingFactor);
         DrawRect(boundaries, thickness, Color.gray);
         // DrawLine(topleft,topright, thickness, Color.gray);
@@ -303,7 +248,6 @@ public class FluidSimViz : MonoBehaviour
                 (cellsHorizontalCount -1 - selectedGrid.y ) * cellSize + cellSize * 0.5f),
             particleIndexes
             );
-
         
         if (!m_ShowVelocities) return;
 
@@ -325,7 +269,6 @@ public class FluidSimViz : MonoBehaviour
         }
 
         particleIndexes.Dispose();
-
     }
 
     static void DrawRect(Rect rect, float thickness, Color color)
@@ -358,7 +301,6 @@ public class FluidSimViz : MonoBehaviour
     {
         var prevColor = Handles.color;
         Handles.color = color;
-        //var rect = new Rect(0,0, thickness, thickness);
         Handles.DrawLine(start, end, thickness);
         Handles.color = prevColor;
     }
