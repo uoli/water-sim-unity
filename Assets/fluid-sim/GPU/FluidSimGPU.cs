@@ -31,6 +31,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     float[] m_PointDensitiesData;
     float[] m_PointPressureData;
     float[] m_PointVelocityData;
+    float[] m_PredictedPositionData;
     ComputeBuffer m_PointBuffer;
     ComputeBuffer m_PredictedPositionBuffer;
     ComputeBuffer m_PointDensitiesBuffer;
@@ -108,6 +109,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_SpatialEntry = new SpatialEntry[ParticleCount];
         m_StartIndices= new int[ParticleCount];
         m_DebugData = new float[ParticleCount];
+        m_PredictedPositionData = new float[ParticleCount*2];
 
         for ( var i = 0; i < ParticleCount; i++ )
         {
@@ -136,6 +138,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_PointDensitiesBuffer.SetData(m_PointDensitiesData);
         m_PointPressureBuffer.SetData(m_PointDensitiesData);
         m_PointVelocityBuffer.SetData(m_PointVelocityData);
+        m_PredictedPositionBuffer.SetData(m_PredictedPositionData);
         
         m_DebugBuffer = new ComputeBuffer(m_DebugData.Length, sizeof(float));
         m_DebugBuffer.SetData(m_DebugData);
@@ -197,7 +200,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         //Calculate Spatial Acceleration tables
         var kernelSpatial0 = SimComputeShader.FindKernel("UpdateSpatialLookup_HashEntries");
         SimComputeShader.GetKernelThreadGroupSizes(kernelSpatial0, out xGroupSize,out yGroupSize,out zGroupSize);
-        SimComputeShader.SetBuffer(kernelSpatial0, "Positions", m_PointBuffer);
+        SimComputeShader.SetBuffer(kernelSpatial0, "PredictedPositions", m_PredictedPositionBuffer);
         SimComputeShader.SetBuffer(kernelSpatial0, "SpatialEntry", m_SpatialEntryBuffer);
         SimComputeShader.SetBuffer(kernelSpatial0, "StartIndices", m_StartIndicesBuffer);
         threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
@@ -215,12 +218,11 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
         SimComputeShader.Dispatch(kernelSpatial2, threadGroupsX,1,1);
         
-        //Calculate Pressure, Density and Predicted Positions
+        //Calculate Pressure and Density 
         var kernelIndex1 = SimComputeShader.FindKernel("ComputeDensityAndPressure");
         SimComputeShader.GetKernelThreadGroupSizes(kernelIndex1, out xGroupSize,out yGroupSize,out zGroupSize);
         SimComputeShader.SetBuffer(kernelIndex1, "SpatialEntry", m_SpatialEntryBuffer);
         SimComputeShader.SetBuffer(kernelIndex1, "StartIndices", m_StartIndicesBuffer);
-        SimComputeShader.SetBuffer(kernelIndex1, "Positions", m_PointBuffer);
         SimComputeShader.SetBuffer(kernelIndex1, "PredictedPositions", m_PredictedPositionBuffer);
         SimComputeShader.SetBuffer(kernelIndex1, "Densities", m_PointDensitiesBuffer);
         SimComputeShader.SetBuffer(kernelIndex1, "Pressure", m_PointPressureBuffer);
@@ -234,7 +236,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.GetKernelThreadGroupSizes(kernelIndex2, out xGroupSize,out yGroupSize,out zGroupSize);
         SimComputeShader.SetBuffer(kernelIndex2, "SpatialEntry", m_SpatialEntryBuffer);
         SimComputeShader.SetBuffer(kernelIndex2, "StartIndices", m_StartIndicesBuffer);
-        SimComputeShader.SetBuffer(kernelIndex2, "Positions", m_PointBuffer);
+        SimComputeShader.SetBuffer(kernelIndex2, "PredictedPositions", m_PredictedPositionBuffer);
         SimComputeShader.SetBuffer(kernelIndex2, "Densities", m_PointDensitiesBuffer);
         SimComputeShader.SetBuffer(kernelIndex2, "Pressure", m_PointPressureBuffer);
         SimComputeShader.SetBuffer(kernelIndex2, "Velocity", m_PointVelocityBuffer);
@@ -260,6 +262,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_DebugBuffer.GetData(m_DebugData);
         m_StartIndicesBuffer.GetData(m_StartIndices);
         m_SpatialEntryBuffer.GetData(m_SpatialEntry);
+        m_PredictedPositionBuffer.GetData(m_PredictedPositionData);
 
         for (var i = 0; i < m_Position.Length; i++)
         {

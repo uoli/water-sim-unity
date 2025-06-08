@@ -62,7 +62,7 @@ uint PositionToCellKey(float2 position)
 void UpdateSpatialLookup_HashEntries(uint3 id : SV_DispatchThreadID)
 {
     int index = id.x;
-    float2 position = float2(Positions[index*2],Positions[index*2+1]);
+    float2 position = PredictedPositions[index];
     int cellKey = PositionToCellKey(position);
     SpatialEntry[index].index = index;
     SpatialEntry[index].cellKey = cellKey;
@@ -111,7 +111,7 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
 {
     //var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
     //lookup.GetParticlesAround(pos, particleIndices);
-    float2 pos = float2(Positions[particleIndex*2], Positions[particleIndex*2 + 1]);
+    float2 pos = PredictedPositions[particleIndex];
     
     float density = 0;
 
@@ -130,8 +130,8 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
                 uint i = SpatialEntry[spatialIndex].index;
                 spatialIndex++;
 
-                float2 position = float2(Positions[i*2], Positions[i*2 + 1]);
-                float2 diff = position - pos;
+                float2 neighbourPosition = PredictedPositions[i];
+                float2 diff = neighbourPosition - pos;
                 float sqrDst = dot(diff,diff);
                 sqrDst = max(sqrDst, 0.0);
                 if (sqrDst > SquaredSmoothingRadius) continue;
@@ -149,7 +149,9 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
 void ComputePredictedPositions (uint3 id : SV_DispatchThreadID)
 {
     uint index = id.x;
-    PredictedPositions[index] = Positions[index] + Velocity[index] * DeltaTime;
+    float2 position = float2(Positions[index*2], Positions[index*2+1]);
+    float2 velocity = float2(Velocity[index*2], Velocity[index*2+1]);
+    PredictedPositions[index] = position + velocity * DeltaTime;
 }
 
 [numthreads(64,1,1)]
@@ -198,7 +200,7 @@ float2 CalculatePressureGradient(uint i) {
     // var particleIndices = new NativeList<int>(position.Length, Allocator.Temp);
     // lookup.GetParticlesAround(position[i], particleIndices);
     float2 pressureGradient = 0;
-    float2 selfPos = float2(Positions[i*2], Positions[i*2 + 1]);
+    float2 selfPos = PredictedPositions[i];
 
     int2 centralCell = PositionToCell(selfPos);
     for (int dx = -1; dx <= 1; dx++)
@@ -215,7 +217,7 @@ float2 CalculatePressureGradient(uint i) {
                 spatialIndex++;
                 
                 if (i == j) continue;
-                float2 neighbourPos = float2(Positions[j*2], Positions[j*2 + 1]);
+                float2 neighbourPos = PredictedPositions[j];
                 float2 dif = neighbourPos - selfPos; 
                 float sqrDst = dot(dif,dif);
                 if (sqrDst > SquaredSmoothingRadius) continue;
