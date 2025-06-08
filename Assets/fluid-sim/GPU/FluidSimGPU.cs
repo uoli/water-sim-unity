@@ -1,5 +1,6 @@
 using System;
 using Unity.Collections;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
@@ -118,6 +119,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_PointVelocityBuffer.SetData(m_PointVelocityData);
         
         m_DebugBuffer = new ComputeBuffer(m_DebugData.Length, sizeof(float));
+        m_DebugBuffer.SetData(m_DebugData);
+
 
     }
     void CleanupComputeBuffers()
@@ -199,6 +202,11 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             m_Density[i] = m_PointDensitiesData[i];
             m_Pressure[i] = m_PointPressureData[i];
             m_Velocity[i] = new Vector2(m_PointVelocityData[i*2], m_PointVelocityData[i*2 + 1]);
+            if (m_DebugData[i] != 0)
+            {
+                EditorApplication.isPaused = true;
+                Debug.Log($"Item {i} has DebugData {m_DebugData[i]}");
+            }
         }
     }
     

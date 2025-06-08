@@ -78,16 +78,6 @@ void ComputeDensityAndPressure (uint3 id : SV_DispatchThreadID)
     float densityError = density - TargetDensity;
     float pressure = densityError * PressureMultiplier;
 
-    if (!isnan(Densities[index]) && !isnan(Positions[index*2] + Positions[index*2+1]) && isnan(density))
-    {
-        DebugBuff[index] += 2;   
-    }
-
-    if (!isnan(Densities[index]) && !isnan(Pressure[index]) && isnan(pressure))
-    {
-        DebugBuff[index] += 4;
-    }
-
     Densities[index] = density;
     Pressure[index] = pressure;
 }
@@ -102,6 +92,22 @@ float SmoothingKernel2Derivative(float dst, float radius)
     return -dif * scalingFactor;
 }
 
+const float EPSILON = 1e-6;
+
+float Hash11(float x) //random
+{
+    x = frac(x * 0.1031);
+    x *= x + 33.33;
+    x *= x + x;
+    return frac(x);
+}
+
+float2 RandomUnitVector2D(uint seed)
+{
+    float angle = Hash11(seed) * PI * 2;
+    return float2(cos(angle), sin(angle));
+}
+
 float2 CalculatePressureGradient(int i) {
     // var particleIndices = new NativeList<int>(position.Length, Allocator.Temp);
     // lookup.GetParticlesAround(position[i], particleIndices);
@@ -111,12 +117,21 @@ float2 CalculatePressureGradient(int i) {
     {
         if (i == j) continue;
         float2 neighbourPos = float2(Positions[j*2], Positions[j*2 + 1]);
-        float2 dif = neighbourPos - selfPos;
+        float2 dif = neighbourPos - selfPos; 
         float sqrDst = dot(dif,dif);
         if (sqrDst > SquaredSmoothingRadius) continue;
-        
-        float2 dir = normalize(dif);
+
         float distance = sqrt(sqrDst);
+        if (distance < 0.000001 || isnan(distance) ) 
+        {
+            //points are too close we get numerical errors
+            //so calculate a random direction really close by.
+            //Not sure about the effects on newtons 3rd law and symmetry
+            //DebugBuff[i]+=6000;
+            dif = RandomUnitVector2D(selfPos.x) * 0.000001;
+            distance = sqrt(dot(dif,dif));
+        }
+        float2 dir = dif/distance;
         //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
         float influence = SmoothingKernel2Derivative(distance, SmoothingRadius);
         float averagedPressure = (Pressure[j] + Pressure[i]) / 2;
@@ -134,17 +149,6 @@ void ComputePressureForce (uint3 id : SV_DispatchThreadID)
     float2 pressureForce = CalculatePressureGradient(index);
     float2 pressureAcceleration = pressureForce / density;
     float2 velocity = pressureAcceleration * DeltaTime;
-
-    if (
-        !isnan(Velocity[index * 2] + Velocity[index * 2 + 1]) &&
-        !isnan(density) &&
-        !isnan(Pressure[index]) &&
-        !isnan(Positions[index * 2] + Positions[index * 2 + 1]) &&
-        isnan(velocity.x + velocity.y)
-        )
-    {
-        DebugBuff[index] += 8; 
-    }
     
     Velocity[index * 2] += velocity.x;
     Velocity[index * 2 + 1] += velocity.y;
