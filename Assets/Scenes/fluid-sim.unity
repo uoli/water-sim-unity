@@ -358,14 +358,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   SimComputeShader: {fileID: 7200000, guid: 47a5eccea77b2bf4ca77adc4d12d562f, type: 3}
+  SortComputeShader: {fileID: 7200000, guid: cae7e393630646ab95afb5834be1888b, type: 3}
   ParticleCount: 100
   Width: 100
   Height: 100
   Mass: 1
-  SmoothingRadius: 10
+  SmoothingRadius: 21.95
   TargetDensity: 0.01
-  PressureMultiplier: 50
-  DeltaTime: 0.01
+  PressureMultiplier: 0.1
+  DeltaTime: 0.03
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
 --- !u!4 &367632488
@@ -395,7 +396,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bfd707f9ef10de64d9d761d11611de09, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_ScalingFactor: 7.67
+  m_ScalingFactor: 7
   m_CircleTexture: {fileID: 2800000, guid: 810fda614b13807479b5eae6ca3a5273, type: 3}
   m_FluidMaterialDebugViz: {fileID: 2100000, guid: 3d457eca536bc2e418f09bb367bb7858, type: 2}
   m_CircleSize: 10

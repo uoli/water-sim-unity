@@ -1,17 +1,30 @@
 // Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel ComputePredictedPositions
 #pragma kernel ComputeDensityAndPressure
 #pragma kernel ComputePressureForce
 #pragma kernel ComputePositionFromVelocityAndHandleCollision
+#pragma kernel UpdateSpatialLookup_HashEntries
+#pragma kernel UpdateSpatialLookup_UpdateStartIndices
+
 
 static const float PI = 3.1415926535897932384626433;
 
+struct SpatialEntryData
+{
+    uint index;
+    uint cellKey;
+};
+
 
 RWStructuredBuffer<float> Positions;
+RWStructuredBuffer<float2> PredictedPositions;
 RWStructuredBuffer<float> Densities;
 RWStructuredBuffer<float> Pressure;
 RWStructuredBuffer<float> Velocity;
 RWStructuredBuffer<float> DebugBuff;
-float ParticleCount;
+RWStructuredBuffer<SpatialEntryData> SpatialEntry;
+RWStructuredBuffer<int> StartIndices;
+int ParticleCount;
 float Width;
 float Height;
 float Mass;
@@ -22,6 +35,64 @@ float SquaredSmoothingRadius;
 float DeltaTime;
 float BoundaryPushStrength;
 float CollisionDamping;
+
+int2 PositionToCell(float2 position)
+{
+    return int2(
+        floor(position.x / SmoothingRadius),
+        floor(position.y / SmoothingRadius)
+    );
+}
+
+uint CellPositionToKey(int2 cell)
+{
+    uint hash = (cell.x * 73856093) ^ (cell.y * 19349663);
+    uint cellKey = ((hash % ParticleCount) + ParticleCount) % ParticleCount;
+    return cellKey;
+}
+
+uint PositionToCellKey(float2 position)
+{
+    int2 cell = PositionToCell(position);
+    uint cellKey = CellPositionToKey(cell);
+    return cellKey;
+}
+
+[numthreads(64,1,1)]
+void UpdateSpatialLookup_HashEntries(uint3 id : SV_DispatchThreadID)
+{
+    int index = id.x;
+    float2 position = float2(Positions[index*2],Positions[index*2+1]);
+    int cellKey = PositionToCellKey(position);
+    SpatialEntry[index].index = index;
+    SpatialEntry[index].cellKey = cellKey;
+    StartIndices[index] = -1;
+}
+
+// void UpdateSpatialLookup2() {
+//     //Sort array by the cellKey this needs gpu sorting
+//     JobHandle dependencyJobHandle = default;
+//     var sortJob = m_SpatialLookup.SortJob();
+//     var sortJobHandle = sortJob.Schedule(dependencyJobHandle);
+//     sortJobHandle.Complete();
+// }
+
+[numthreads(64,1,1)]
+void UpdateSpatialLookup_UpdateStartIndices(uint3 id : SV_DispatchThreadID) {
+    uint index = id.x;
+    if ((int)index >= ParticleCount) return;
+
+    uint prev_val = ParticleCount+2;
+    if (index > 0)
+    {
+        prev_val = SpatialEntry[index-1].cellKey;
+    }
+    uint current_val = SpatialEntry[index].cellKey;
+    if (current_val != prev_val)
+    {
+        StartIndices[current_val] = index;
+    }
+}
 
 //TODO: this can be calculated once outside the shader
 float CalcSmoothingKernel2Factor(float smoothingRadius)
@@ -41,21 +112,44 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
     //var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
     //lookup.GetParticlesAround(pos, particleIndices);
     float2 pos = float2(Positions[particleIndex*2], Positions[particleIndex*2 + 1]);
-
-        
+    
     float density = 0;
-    for (int i = 0; i < ParticleCount; i++)
+
+    //Spatial Accel - Is there a way to make this more modular / reusable?
+    int2 centralCell = PositionToCell(pos);
+    for (int dx = -1; dx <= 1; dx++)
     {
-        float2 position = float2(Positions[i*2], Positions[i*2 + 1]);
-        float2 diff = position - pos;
-        float sqrDst = dot(diff,diff);
-        sqrDst = max(sqrDst, 0.0);
-        if (sqrDst > SquaredSmoothingRadius) continue;
-        //var influence = SmoothingKernel(sqrDst, squaredSmoothingLength, kernelTerm);
-        float influence = SmoothingKernel2(sqrt(sqrDst), SmoothingRadius, precalculatedKernelFactor);
-        density += Mass * influence;
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            int2 cell = centralCell + int2(dx, dy);
+            uint cellKey = CellPositionToKey(cell);
+            uint spatialIndex = StartIndices[cellKey];
+            if (spatialIndex == -1) continue;
+            do
+            {
+                uint i = SpatialEntry[spatialIndex].index;
+                spatialIndex++;
+
+                float2 position = float2(Positions[i*2], Positions[i*2 + 1]);
+                float2 diff = position - pos;
+                float sqrDst = dot(diff,diff);
+                sqrDst = max(sqrDst, 0.0);
+                if (sqrDst > SquaredSmoothingRadius) continue;
+                //var influence = SmoothingKernel(sqrDst, squaredSmoothingLength, kernelTerm);
+                float influence = SmoothingKernel2(sqrt(sqrDst), SmoothingRadius, precalculatedKernelFactor);
+                density += Mass * influence;
+                
+            } while (spatialIndex < (uint)ParticleCount && SpatialEntry[spatialIndex].cellKey == cellKey);
+        }
     }
     return density;
+}
+
+[numthreads(64,1,1)]
+void ComputePredictedPositions (uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+    PredictedPositions[index] = Positions[index] + Velocity[index] * DeltaTime;
 }
 
 [numthreads(64,1,1)]
@@ -63,14 +157,6 @@ void ComputeDensityAndPressure (uint3 id : SV_DispatchThreadID)
 {
     int index = id.x;
     if (index >= ParticleCount) return;
-    
-    //float area = Width * Height;
-    //float particlePerArea = area / ParticleCount;
-    float y =  index / Height;
-    float x =  index % Width;
-
-    // Positions[id.x*2] = x;
-    // Positions[id.x*2 + 1] = y;
 
     float precalculatedKernelFactor = CalcSmoothingKernel2Factor(SmoothingRadius);
     float density = CalculateDensity(index, precalculatedKernelFactor);
@@ -108,34 +194,50 @@ float2 RandomUnitVector2D(uint seed)
     return float2(cos(angle), sin(angle));
 }
 
-float2 CalculatePressureGradient(int i) {
+float2 CalculatePressureGradient(uint i) {
     // var particleIndices = new NativeList<int>(position.Length, Allocator.Temp);
     // lookup.GetParticlesAround(position[i], particleIndices);
     float2 pressureGradient = 0;
     float2 selfPos = float2(Positions[i*2], Positions[i*2 + 1]);
-    for (int j = 0; j < ParticleCount; j++)
-    {
-        if (i == j) continue;
-        float2 neighbourPos = float2(Positions[j*2], Positions[j*2 + 1]);
-        float2 dif = neighbourPos - selfPos; 
-        float sqrDst = dot(dif,dif);
-        if (sqrDst > SquaredSmoothingRadius) continue;
 
-        float distance = sqrt(sqrDst);
-        if (distance < 0.000001 || isnan(distance) ) 
+    int2 centralCell = PositionToCell(selfPos);
+    for (int dx = -1; dx <= 1; dx++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
         {
-            //points are too close we get numerical errors
-            //so calculate a random direction really close by.
-            //Not sure about the effects on newtons 3rd law and symmetry
-            //DebugBuff[i]+=6000;
-            dif = RandomUnitVector2D(selfPos.x) * 0.000001;
-            distance = sqrt(dot(dif,dif));
+            int2 cell = centralCell + int2(dx, dy);
+            uint cellKey = CellPositionToKey(cell);
+            uint spatialIndex = StartIndices[cellKey];
+            if (spatialIndex == -1) continue;
+            do
+            {
+                uint j = SpatialEntry[spatialIndex].index;
+                spatialIndex++;
+                
+                if (i == j) continue;
+                float2 neighbourPos = float2(Positions[j*2], Positions[j*2 + 1]);
+                float2 dif = neighbourPos - selfPos; 
+                float sqrDst = dot(dif,dif);
+                if (sqrDst > SquaredSmoothingRadius) continue;
+
+                float distance = sqrt(sqrDst);
+                if (distance < 0.000001 || isnan(distance) ) 
+                {
+                    //points are too close we get numerical errors
+                    //so calculate a random direction really close by.
+                    //Not sure about the effects on newtons 3rd law and symmetry
+                    //DebugBuff[i]+=6000;
+                    dif = RandomUnitVector2D(selfPos.x) * 0.000001;
+                    distance = sqrt(dot(dif,dif));
+                }
+                float2 dir = dif/distance;
+                //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
+                float influence = SmoothingKernel2Derivative(distance, SmoothingRadius);
+                float averagedPressure = (Pressure[j] + Pressure[i]) / 2;
+                pressureGradient += dir * (averagedPressure * Mass) / Densities[j] * influence;
+                
+            } while (spatialIndex < (uint)ParticleCount && SpatialEntry[spatialIndex].cellKey == cellKey);
         }
-        float2 dir = dif/distance;
-        //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
-        float influence = SmoothingKernel2Derivative(distance, SmoothingRadius);
-        float averagedPressure = (Pressure[j] + Pressure[i]) / 2;
-        pressureGradient += dir * (averagedPressure * Mass) / Densities[j] * influence;
     }
     return pressureGradient;
 }
@@ -143,7 +245,7 @@ float2 CalculatePressureGradient(int i) {
 [numthreads(64,1,1)]
 void ComputePressureForce (uint3 id : SV_DispatchThreadID)
 {
-    int index = id.x;
+    uint index = id.x;
     
     float density = Densities[index]; 
     float2 pressureForce = CalculatePressureGradient(index);

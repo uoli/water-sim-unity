@@ -1,0 +1,40 @@
+﻿#pragma kernel BitonicMerge
+
+struct SpatialEntry
+{
+    uint index;
+    uint cellKey;
+};
+
+StructuredBuffer<SpatialEntry> InputBuffer;
+RWStructuredBuffer<SpatialEntry> OutputBuffer;
+
+cbuffer Params
+{
+    int k; // Merge window size
+    int j; // Compare distance
+};
+
+// Thread group size must match the data size you want to sort
+[numthreads(256, 1, 1)]
+void BitonicMerge(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    uint ixj = i ^ j;
+
+    if (ixj > i) {
+        SpatialEntry a = InputBuffer[i];
+        SpatialEntry b = InputBuffer[ixj];
+
+        // Ascending if i has 0 in the k bit
+        bool ascending = ((i & k) == 0);
+
+        if ((a.cellKey > b.cellKey) == ascending) {
+            OutputBuffer[i] = b;
+            OutputBuffer[ixj] = a;
+        } else {
+            OutputBuffer[i] = a;
+            OutputBuffer[ixj] = b;
+        }
+    }
+}
