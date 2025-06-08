@@ -327,6 +327,86 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &367632486
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 367632488}
+  - component: {fileID: 367632487}
+  - component: {fileID: 367632489}
+  m_Layer: 0
+  m_Name: FluidGPU
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &367632487
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 367632486}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f5fad92673677c741bf9c1dcfa4dcd2e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SimComputeShader: {fileID: 7200000, guid: 47a5eccea77b2bf4ca77adc4d12d562f, type: 3}
+  ParticleCount: 100
+  Width: 100
+  Height: 100
+  Mass: 1
+  SmoothingRadius: 10
+  TargetDensity: 0.01
+  PressureMultiplier: 50
+--- !u!4 &367632488
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 367632486}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 14.49, z: 44.7}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &367632489
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 367632486}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bfd707f9ef10de64d9d761d11611de09, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_ScalingFactor: 7.67
+  m_CircleTexture: {fileID: 2800000, guid: 810fda614b13807479b5eae6ca3a5273, type: 3}
+  m_FluidMaterialDebugViz: {fileID: 2100000, guid: 3d457eca536bc2e418f09bb367bb7858, type: 2}
+  m_CircleSize: 10
+  m_ShowVelocities: 0
+  m_ShowGrid: 0
+  m_ShowParticleOverlay: 0
+  m_velocityScale: 1
+  m_DensityVizFactor: 1
+  m_FieldVisualizationMode: 0
+  m_ParticleVisualizationMode: 0
+  m_NegativePressureColor: {r: 0, g: 0, b: 0, a: 0}
+  m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
+  m_PositivePressureColor: {r: 1, g: 0, b: 0, a: 0}
+  m_MouseRadius: 1
 --- !u!1 &604712593
 GameObject:
   m_ObjectHideFlags: 0
@@ -617,12 +697,12 @@ GameObject:
   - component: {fileID: 2014640969}
   - component: {fileID: 2014640968}
   m_Layer: 0
-  m_Name: Fluid
+  m_Name: FluidCPU
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &2014640968
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -640,10 +720,12 @@ MonoBehaviour:
   m_FluidMaterialDebugViz: {fileID: 2100000, guid: 3d457eca536bc2e418f09bb367bb7858, type: 2}
   m_CircleSize: 1
   m_ShowVelocities: 0
-  m_velocityScale: 1
   m_ShowGrid: 0
+  m_ShowParticleOverlay: 0
+  m_velocityScale: 1
   m_DensityVizFactor: 57.4
-  m_VisualizationMode: 0
+  m_FieldVisualizationMode: 0
+  m_ParticleVisualizationMode: 1
   m_NegativePressureColor: {r: 0, g: 0.09055519, b: 0.53333336, a: 0}
   m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
   m_PositivePressureColor: {r: 0.735849, g: 0, b: 0, a: 0}
@@ -667,7 +749,7 @@ MonoBehaviour:
   Mass: 1
   SmoothingLength: 7.1
   m_PressureMultiplier: 5051.1
-  UseAdaptativeSetpTime: 0
+  UseAdaptativeStepTime: 0
   SimulationStep: 0.03
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
@@ -762,5 +844,6 @@ SceneRoots:
   - {fileID: 961739753}
   - {fileID: 604712594}
   - {fileID: 2014640970}
+  - {fileID: 367632488}
   - {fileID: 248911683}
   - {fileID: 1529895642}

@@ -7,7 +7,7 @@ using Unity.Profiling;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
-public class FluidSim : MonoBehaviour
+public class FluidSim : MonoBehaviour, IFluidSim
 {
     public int m_ParticleCount;
 
@@ -25,6 +25,8 @@ public class FluidSim : MonoBehaviour
     public bool AutoStep = true;
     public float ViscosityFactor = 0.5f;
     public float m_InteractionStrength;
+    public float m_TargetDensity;
+
     
     NativeArray<Vector2> m_Position;
     NativeArray<Vector2> m_PredictedPosition;
@@ -36,7 +38,6 @@ public class FluidSim : MonoBehaviour
     float m_SquaredSmoothingLength;
     float m_KernelTerm;
     float m_KernelDerivativeTerm;
-    public float m_TargetDensity;
     float m_LastStepMaxVelocity;
     Vector2 m_MousePosition;
     float m_MouseRadius;
@@ -47,11 +48,18 @@ public class FluidSim : MonoBehaviour
     static readonly ProfilerMarker s_PressurePerfMarker = new ProfilerMarker("FluidSim.PressureCalc");
     static readonly ProfilerMarker s_DensityPerfMarker = new ProfilerMarker("FluidSim.DensityeCalc");
 
+    public GridSpatialLookup LookupHelper => throw new NotImplementedException();
     public ReadOnlySpan<Vector2> GetPositions() { return m_Position.AsReadOnlySpan(); }
     public ReadOnlySpan<float> GetDensities() { return m_Density.AsReadOnlySpan(); }
     public ReadOnlySpan<float> GetPressures() { return m_Pressure.AsReadOnlySpan(); }
     public ReadOnlySpan<Vector2> GetVelocities() { return m_Velocity.AsReadOnlySpan(); }
-    
+    public int ParticleCount => m_ParticleCount;
+    float IFluidSim.Mass => Mass;
+    public float Height => height;
+    public float Width => width;
+    public float SmoothingRadius => SmoothingLength;
+    float IFluidSim.TargetDensity => m_TargetDensity;
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -165,11 +173,6 @@ public class FluidSim : MonoBehaviour
         m_MouseRadius = 0; //clear mouse interaction
     }
 
-    public enum InteractionDirection
-    {
-        Attract,
-        Repel
-    }
     public void Interact(Vector2 position, float radius, InteractionDirection direction)
     {
         m_MousePosition = position;
@@ -424,7 +427,7 @@ public class FluidSim : MonoBehaviour
         }
     }
 
-    public float CalcTargetDensity()
+    public float TargetDensity()
     {
         return m_ParticleCount / (float)(width * height);
     }

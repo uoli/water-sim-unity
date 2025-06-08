@@ -1,14 +1,117 @@
 // Each #kernel tells which function to compile; you can have many kernels
-#pragma kernel CSMain
+#pragma kernel ComputeDensityAndPressure
+#pragma kernel ComputePressureForce
 
-// Create a RenderTexture with enableRandomWrite flag and set it
-// with cs.SetTexture
-RWTexture2D<float4> Result;
+static const float PI = 3.1415926535897932384626433;
 
-[numthreads(8,8,1)]
-void CSMain (uint3 id : SV_DispatchThreadID)
+
+RWStructuredBuffer<float> Positions;
+RWStructuredBuffer<float> Densities;
+RWStructuredBuffer<float> Pressure;
+RWStructuredBuffer<float> Velocity;
+float ParticleCount;
+float Width;
+float Height;
+float Mass;
+float TargetDensity;
+float PressureMultiplier;
+float SmoothingRadius;
+float SquaredSmoothingRadius;
+float DeltaTime;
+
+//TODO: this can be calculated once outside the shader
+float CalcSmoothingKernel2Factor(float smoothingRadius)
+{
+    return 6 / (PI * pow(smoothingRadius, 4));
+}
+
+float SmoothingKernel2(float dst, float radius, float preCalculatedFactor)
+{
+    if (dst >= radius) return 0;
+    float dif = radius - dst;
+    return dif * dif * preCalculatedFactor; 
+}
+
+float CalculateDensity(float2 pos, float precalculatedKernelFactor)
+{
+    //var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
+    //lookup.GetParticlesAround(pos, particleIndices);
+        
+    float density = 0;
+    for (int i = 0; i < ParticleCount; i++)
+    {
+        float2 position = float2(Positions[i*2], Positions[i*2 + 1]);
+        float2 diff = position - pos;
+        float sqrDst = dot(diff,diff);
+        if (sqrDst > SquaredSmoothingRadius) continue;
+        //var influence = SmoothingKernel(sqrDst, squaredSmoothingLength, kernelTerm);
+        float influence = SmoothingKernel2(sqrt(sqrDst), SmoothingRadius, precalculatedKernelFactor);
+        density += Mass * influence;
+    }
+    return density;
+}
+
+[numthreads(10,1,1)]
+void ComputeDensityAndPressure (uint3 id : SV_DispatchThreadID)
 {
     // TODO: insert actual code here!
+    int index = id.x;
+    //float area = Width * Height;
+    //float particlePerArea = area / ParticleCount;
+    float y =  index / Height;
+    float x =  index % Width;
 
-    Result[id.xy] = float4(id.x & id.y, (id.x & 15)/15.0, (id.y & 15)/15.0, 0.0);
+    // Positions[id.x*2] = x;
+    // Positions[id.x*2 + 1] = y;
+
+    float precalculatedKernelFactor = CalcSmoothingKernel2Factor(SmoothingRadius);
+    Densities[index] = CalculateDensity(Positions[index], precalculatedKernelFactor);
+
+    float densityError = Densities[index] - TargetDensity;
+    float pressure = densityError * PressureMultiplier;
+    Pressure[index] = pressure;
+}
+
+float SmoothingKernel2Derivative(float dst, float radius)
+{
+    if (dst >= radius) return 0;
+
+    float scalingFactor = 12 / (pow(radius, 4) * PI); //TODO: this can be calculated once outside the shader
+    float dif = radius - dst;
+
+    return -dif * scalingFactor;
+}
+
+float2 CalculatePressureGradient(int i) {
+    // var particleIndices = new NativeList<int>(position.Length, Allocator.Temp);
+    // lookup.GetParticlesAround(position[i], particleIndices);
+    float2 pressureGradient = 0;
+    for (int j = 0; j < ParticleCount; j++)
+    {
+        if (i == j) continue;
+            
+        float2 dif = Positions[j] - Positions[i];
+        float2 dir = normalize(dif);
+        float sqrDst = dot(dif,dif);
+        if (sqrDst > SquaredSmoothingRadius) continue; 
+        float distance = sqrt(sqrDst);
+        //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
+        float influence = SmoothingKernel2Derivative(distance, SmoothingRadius);
+        float averagedPressure = (Pressure[j] + Pressure[i]) / 2;
+        pressureGradient += dir * (averagedPressure * Mass) / Densities[j] * influence;
+    }
+    return pressureGradient;
+}
+
+[numthreads(10,1,1)]
+void ComputePressureForce (uint3 id : SV_DispatchThreadID)
+{
+    int index = id.x;
+    
+    float density = Densities[index]; 
+    float2 pressureForce = CalculatePressureGradient(index);
+    float2 pressureAcceleration = pressureForce / density;
+    float2 velocity = pressureAcceleration * DeltaTime;
+    Velocity[index * 2] += velocity.x;
+    Velocity[index * 2 + 1] += velocity.y;
 }

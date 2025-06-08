@@ -18,7 +18,7 @@ public class FluidSimEditor : Editor
         {
             sim.DoUpdate();
         }
-        EditorGUILayout.LabelField($"TargetDensity:{sim.CalcTargetDensity()}");
+        EditorGUILayout.LabelField($"TargetDensity:{sim.TargetDensity()}");
     }
 }
 

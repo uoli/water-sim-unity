@@ -1,2 +1,12 @@
 fileFormatVersion: 2
 guid: f5fad92673677c741bf9c1dcfa4dcd2e
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - SimComputeShader: {fileID: 7200000, guid: 47a5eccea77b2bf4ca77adc4d12d562f, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
