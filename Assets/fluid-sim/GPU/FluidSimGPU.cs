@@ -138,6 +138,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     // Update is called once per frame
     void Update()
     {
+        if (ParticleCount != m_PointDensitiesBuffer.count)
+        {
+            InitParticleData();
+        }
         
         SimComputeShader.SetFloat("ParticleCount", ParticleCount);
         SimComputeShader.SetFloat("Mass", Mass);
@@ -168,6 +172,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetBuffer(kernelIndex1, "Densities", m_PointDensitiesBuffer);
         SimComputeShader.SetBuffer(kernelIndex1, "Pressure", m_PointPressureBuffer);
         SimComputeShader.SetBuffer(kernelIndex1, "Velocity", m_PointVelocityBuffer);
+        SimComputeShader.SetBuffer(kernelIndex1, "DebugBuff", m_DebugBuffer);
         threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
         SimComputeShader.Dispatch(kernelIndex1, threadGroupsX,1,1);
 
@@ -177,6 +182,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetBuffer(kernelIndex2, "Densities", m_PointDensitiesBuffer);
         SimComputeShader.SetBuffer(kernelIndex2, "Pressure", m_PointPressureBuffer);
         SimComputeShader.SetBuffer(kernelIndex2, "Velocity", m_PointVelocityBuffer);
+        SimComputeShader.SetBuffer(kernelIndex2, "DebugBuff", m_DebugBuffer);
         threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
         SimComputeShader.Dispatch(kernelIndex2, threadGroupsX,1,1);
 

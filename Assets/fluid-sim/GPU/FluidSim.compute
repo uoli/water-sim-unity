@@ -73,10 +73,22 @@ void ComputeDensityAndPressure (uint3 id : SV_DispatchThreadID)
     // Positions[id.x*2 + 1] = y;
 
     float precalculatedKernelFactor = CalcSmoothingKernel2Factor(SmoothingRadius);
-    Densities[index] = CalculateDensity(index, precalculatedKernelFactor);
-
-    float densityError = Densities[index] - TargetDensity;
+    float density = CalculateDensity(index, precalculatedKernelFactor);
+    
+    float densityError = density - TargetDensity;
     float pressure = densityError * PressureMultiplier;
+
+    if (!isnan(Densities[index]) && !isnan(Positions[index*2] + Positions[index*2+1]) && isnan(density))
+    {
+        DebugBuff[index] += 2;   
+    }
+
+    if (!isnan(Densities[index]) && !isnan(Pressure[index]) && isnan(pressure))
+    {
+        DebugBuff[index] += 4;
+    }
+
+    Densities[index] = density;
     Pressure[index] = pressure;
 }
 
@@ -122,6 +134,18 @@ void ComputePressureForce (uint3 id : SV_DispatchThreadID)
     float2 pressureForce = CalculatePressureGradient(index);
     float2 pressureAcceleration = pressureForce / density;
     float2 velocity = pressureAcceleration * DeltaTime;
+
+    if (
+        !isnan(Velocity[index * 2] + Velocity[index * 2 + 1]) &&
+        !isnan(density) &&
+        !isnan(Pressure[index]) &&
+        !isnan(Positions[index * 2] + Positions[index * 2 + 1]) &&
+        isnan(velocity.x + velocity.y)
+        )
+    {
+        DebugBuff[index] += 8; 
+    }
+    
     Velocity[index * 2] += velocity.x;
     Velocity[index * 2 + 1] += velocity.y;
 }
