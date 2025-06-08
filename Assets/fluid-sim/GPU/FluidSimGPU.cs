@@ -14,6 +14,9 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float SmoothingRadius = 1.4f;
     public float TargetDensity = 0.01f;
     public float PressureMultiplier = 50;
+    public float DeltaTime = 0.001f;
+    public float BoundaryPushStrength = 0;
+    public float CollisionDamping = 0.5f;
 
     NativeArray<Vector2> m_Position;
     NativeArray<Vector2> m_PredictedPosition;
@@ -30,8 +33,12 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     ComputeBuffer m_PointDensitiesBuffer;
     ComputeBuffer m_PointPressureBuffer;
     ComputeBuffer m_PointVelocityBuffer;
+    
+    float[] m_DebugData;
+    ComputeBuffer m_DebugBuffer;
 
     
+
     int IFluidSim.ParticleCount => ParticleCount;
     float IFluidSim.Mass => Mass;
     float IFluidSim.Height => Height;
@@ -81,6 +88,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_PointPositionData = new float[ParticleCount * 2];
         m_PointDensitiesData = new float[ParticleCount];
         m_PointPressureData = new float[ParticleCount];
+        m_DebugData = new float[ParticleCount];
         m_PointVelocityData = new float[ParticleCount * 2];
         for ( var i = 0; i < ParticleCount; i++ )
         {
@@ -97,6 +105,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             m_PointPressureData[i] = 0;
             m_PointVelocityData[i*2] = 0;
             m_PointVelocityData[i*2 + 1] = 0;
+
+            m_DebugData[i] = 0;
         }
         m_PointBuffer = new ComputeBuffer(m_PointPositionData.Length, sizeof(float));
         m_PointDensitiesBuffer = new ComputeBuffer(m_PointDensitiesData.Length, sizeof(float));
@@ -105,7 +115,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_PointBuffer.SetData(m_PointPositionData);
         m_PointDensitiesBuffer.SetData(m_PointDensitiesData);
         m_PointPressureBuffer.SetData(m_PointDensitiesData);
-        m_PointVelocityBuffer.SetData(m_PointDensitiesData);
+        m_PointVelocityBuffer.SetData(m_PointVelocityData);
+        
+        m_DebugBuffer = new ComputeBuffer(m_DebugData.Length, sizeof(float));
+
     }
     void CleanupComputeBuffers()
     {
@@ -117,6 +130,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             m_PointPressureBuffer.Release();
         if (m_PointVelocityBuffer != null)
             m_PointVelocityBuffer.Release();
+        if (m_DebugBuffer != null)
+            m_DebugBuffer.Release();
     }
 
 
@@ -132,29 +147,45 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("PressureMultiplier", PressureMultiplier);
         SimComputeShader.SetFloat("SmoothingRadius", SmoothingRadius);
         SimComputeShader.SetFloat("SquaredSmoothingRadius", SmoothingRadius * SmoothingRadius);
+        SimComputeShader.SetFloat("DeltaTime", DeltaTime);
+        SimComputeShader.SetFloat("BoundaryPushStrength", BoundaryPushStrength);
+        SimComputeShader.SetFloat("CollisionDamping", CollisionDamping);
 
         //Calculate Pressure and Density
         var kernelIndex0 = SimComputeShader.FindKernel("ComputeDensityAndPressure");
+        SimComputeShader.GetKernelThreadGroupSizes(kernelIndex0, out var xGroupSize,out var yGroupSize,out var zGroupSize);
         SimComputeShader.SetBuffer(kernelIndex0, "Positions", m_PointBuffer);
         SimComputeShader.SetBuffer(kernelIndex0, "Densities", m_PointDensitiesBuffer);
         SimComputeShader.SetBuffer(kernelIndex0, "Pressure", m_PointPressureBuffer);
         SimComputeShader.SetBuffer(kernelIndex0, "Velocity", m_PointVelocityBuffer);
-
-        SimComputeShader.Dispatch(kernelIndex0,ParticleCount/10,8,8);
+        SimComputeShader.SetBuffer(kernelIndex0, "DebugBuff", m_DebugBuffer);
+        var threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+        SimComputeShader.Dispatch(kernelIndex0, threadGroupsX,1,1);
         
         var kernelIndex1 = SimComputeShader.FindKernel("ComputePressureForce");
-
+        SimComputeShader.GetKernelThreadGroupSizes(kernelIndex1, out xGroupSize,out yGroupSize,out zGroupSize);
         SimComputeShader.SetBuffer(kernelIndex1, "Positions", m_PointBuffer);
         SimComputeShader.SetBuffer(kernelIndex1, "Densities", m_PointDensitiesBuffer);
         SimComputeShader.SetBuffer(kernelIndex1, "Pressure", m_PointPressureBuffer);
         SimComputeShader.SetBuffer(kernelIndex1, "Velocity", m_PointVelocityBuffer);
+        threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+        SimComputeShader.Dispatch(kernelIndex1, threadGroupsX,1,1);
 
-        SimComputeShader.Dispatch(kernelIndex1,ParticleCount/10,8,8);
+        var kernelIndex2 = SimComputeShader.FindKernel("ComputePositionFromVelocityAndHandleCollision");
+        SimComputeShader.GetKernelThreadGroupSizes(kernelIndex2, out xGroupSize,out yGroupSize,out zGroupSize);
+        SimComputeShader.SetBuffer(kernelIndex2, "Positions", m_PointBuffer);
+        SimComputeShader.SetBuffer(kernelIndex2, "Densities", m_PointDensitiesBuffer);
+        SimComputeShader.SetBuffer(kernelIndex2, "Pressure", m_PointPressureBuffer);
+        SimComputeShader.SetBuffer(kernelIndex2, "Velocity", m_PointVelocityBuffer);
+        threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+        SimComputeShader.Dispatch(kernelIndex2, threadGroupsX,1,1);
+
         
         m_PointBuffer.GetData(m_PointPositionData);
         m_PointDensitiesBuffer.GetData(m_PointDensitiesData);
         m_PointPressureBuffer.GetData(m_PointPressureData);
         m_PointVelocityBuffer.GetData(m_PointVelocityData);
+        m_DebugBuffer.GetData(m_DebugData);
 
         for (var i = 0; i < m_Position.Length; i++)
         {
@@ -168,6 +199,6 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     
     public void Interact(Vector2 mouseInSimulationSpace, float scalingFactor, InteractionDirection interactionDirection)
     {
-        throw new NotImplementedException();
+        //throw new NotImplementedException();
     }
 }

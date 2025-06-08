@@ -365,6 +365,9 @@ MonoBehaviour:
   SmoothingRadius: 10
   TargetDensity: 0.01
   PressureMultiplier: 50
+  DeltaTime: 0.01
+  BoundaryPushStrength: 0
+  CollisionDamping: 0.5
 --- !u!4 &367632488
 Transform:
   m_ObjectHideFlags: 0
