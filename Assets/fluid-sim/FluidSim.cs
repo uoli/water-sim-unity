@@ -577,10 +577,10 @@ public class FluidSim : MonoBehaviour
             var distance = Mathf.Sqrt(sqrDst);
             //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
             var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
-            viscosity +=  velDif * viscosityFactor * mass / density[j] * influence;
+            viscosity +=  velDif * mass / density[j] * influence;
         }
         particleIndices.Dispose();
-        return viscosity;
+        return viscosity * viscosityFactor;
     }
     
 
