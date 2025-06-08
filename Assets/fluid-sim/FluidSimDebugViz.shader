@@ -253,10 +253,9 @@ Shader "Unlit/FluidSimDebugViz"
                             _particle_velocities[i*2],
                             _particle_velocities[i*2+1]);
                         float velMag = length(vel);
-                        //velMag *= .5;
-                        //velMag = velMag + _min_velocity;
-                        velMag = velMag / _max_velocity;
-                        //vel = 1 + vel * 0.5;
+                        //velMag = velMag / _max_velocity;
+                        velMag = log(velMag + 1) / log(_max_velocity + 1); // maps [0, maxValue] -> [0,1]
+                        //velMag = pow(velMag / _max_velocity, 2);
                         col = float4(velMag, 0, 1-velMag, 1);
                         break;
                     }
