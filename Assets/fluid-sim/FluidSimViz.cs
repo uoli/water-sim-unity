@@ -3,15 +3,20 @@ using Unity.Collections;
 using Unity.Profiling;
 using UnityEditor;
 using UnityEngine;
-using Vector2 = UnityEngine.Vector2;
-using Vector3 = UnityEngine.Vector3;
 
-public enum VisualizationMode
+public enum FieldVisualizationMode
 {
     Density = 0,
     Pressure = 1,
     PressureGradient = 2,
     NoBackground = 3,
+}
+
+public enum ParticleVisualizationMode
+{
+    Solid = 0,
+    Pressure = 1,
+    Velocity = 2,
 }
 
 public class FluidSimViz : MonoBehaviour
@@ -22,9 +27,11 @@ public class FluidSimViz : MonoBehaviour
     public float m_CircleSize = 10;
     public bool m_ShowVelocities = false;
     public bool m_ShowGrid = false;
+    public bool m_ShowParticleOverlay = false;
     public float m_velocityScale = 1.0f;
     public float m_DensityVizFactor = 1;
-    public VisualizationMode m_VisualizationMode = VisualizationMode.Density;
+    public FieldVisualizationMode m_FieldVisualizationMode = FieldVisualizationMode.Density;
+    public ParticleVisualizationMode m_ParticleVisualizationMode = ParticleVisualizationMode.Pressure;
     public Color m_NegativePressureColor;
     public Color m_NeutralPressureColor;
     public Color m_PositivePressureColor;
@@ -124,20 +131,28 @@ public class FluidSimViz : MonoBehaviour
         
         var velocities = m_FluidSim.GetVelocities();
         m_KineticEnergy = 0;
+        var minVelocity = 0f;
+        var maxVelocity = 0f;
         for (var index = 0; index < m_FluidSim.m_ParticleCount; index++)
         {
             var velocity = velocities[index];
             m_PointVelocityData[index * 2] = velocity.x;
             m_PointVelocityData[index * 2 + 1] = velocity.y;
             m_KineticEnergy += 0.5f * m_FluidSim.Mass * Vector2.Dot(velocity, velocity);
+            minVelocity = Mathf.Min(velocity.sqrMagnitude, minVelocity);
+            maxVelocity = Mathf.Max(velocity.sqrMagnitude, maxVelocity);
         }
+        minVelocity = Mathf.Sqrt(minVelocity);
+        maxVelocity = Mathf.Sqrt(maxVelocity);
         
         m_PointBuffer.SetData(m_PointPositionData);
         m_PointDensitiesBuffer.SetData(m_PointDensitiesData);
         m_PointPressureBuffer.SetData(m_PointPressureData);
+        m_PointVelocityBuffer.SetData(m_PointVelocityData);
         m_FluidMaterialDebugViz.SetBuffer("_particle_positions", m_PointBuffer);
         m_FluidMaterialDebugViz.SetBuffer("_particle_densities", m_PointDensitiesBuffer);
         m_FluidMaterialDebugViz.SetBuffer("_particle_pressures", m_PointPressureBuffer);
+        m_FluidMaterialDebugViz.SetBuffer("_particle_velocities", m_PointVelocityBuffer);
         m_FluidMaterialDebugViz.SetInt("_PointCount", m_FluidSim.m_ParticleCount);
 
         m_FluidMaterialDebugViz.SetFloat("_scaling_factor", m_ScalingFactor);
@@ -154,7 +169,8 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_smoothingLength", m_FluidSim.SmoothingLength);
         m_FluidMaterialDebugViz.SetFloat("_DensityVizFactor", m_DensityVizFactor);
         m_FluidMaterialDebugViz.SetFloat("_circleSize", m_CircleSize);
-        m_FluidMaterialDebugViz.SetInt("_visMode", (int)m_VisualizationMode);
+        m_FluidMaterialDebugViz.SetInt("_fieldVisMode", (int)m_FieldVisualizationMode);
+        m_FluidMaterialDebugViz.SetInt("_particleVisMode", (int)m_ParticleVisualizationMode);
         m_FluidMaterialDebugViz.SetColor("_negativePressureColor", m_NegativePressureColor);
         m_FluidMaterialDebugViz.SetColor("_neutralPressureColor", m_NeutralPressureColor);
         m_FluidMaterialDebugViz.SetColor("_positivePressureColor", m_PositivePressureColor);
@@ -162,6 +178,8 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_min_pressure", minPressure);
         m_FluidMaterialDebugViz.SetFloat("_target_density", m_FluidSim.CalcTargetDensity());
         m_FluidMaterialDebugViz.SetFloat("_max_density", maxDensity);
+        m_FluidMaterialDebugViz.SetFloat("_max_velocity", maxVelocity);
+        m_FluidMaterialDebugViz.SetFloat("_min_velocity", minVelocity);
         
         if (m_MousePressed)
             m_FluidSim.Interact(mouseInSimulationSpace, m_MouseRadius / m_ScalingFactor, m_InteractionDirection);
@@ -263,8 +281,8 @@ public class FluidSimViz : MonoBehaviour
             position.y = m_FluidSim.height* m_ScalingFactor - position.y;
             var velocity = velocities[i];
             velocity.y *= -1;
-
-            DrawCircle(position, m_CircleSize , circleColor);
+            if (m_ShowParticleOverlay)
+                DrawCircle(position, m_CircleSize , circleColor);
             DrawArrow(position, velocity * m_velocityScale, Color.green);
         }
 

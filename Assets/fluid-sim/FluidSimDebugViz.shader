@@ -27,6 +27,7 @@ Shader "Unlit/FluidSimDebugViz"
     StructuredBuffer<float> _particle_positions;
     StructuredBuffer<float> _particle_densities;
     StructuredBuffer<float> _particle_pressures;
+    StructuredBuffer<float> _particle_velocities;
     int _PointCount;
     float _scaling_factor;
     float _sizex;
@@ -38,11 +39,14 @@ Shader "Unlit/FluidSimDebugViz"
     float _smoothingLength;
     float _DensityVizFactor;
     float _circleSize;
-    int _visMode;
+    int _fieldVisMode;
+    int _particleVisMode;
     float _min_pressure;
     float _max_pressure;
     float _target_density;
     float _max_density;
+    float _max_velocity;
+    float _min_velocity;
     float4 _negativePressureColor;
     float4 _neutralPressureColor;
     float4 _positivePressureColor;
@@ -177,7 +181,7 @@ Shader "Unlit/FluidSimDebugViz"
         _min_pressure = min(_min_pressure, -1);
 
         fixed4 col;
-        if (_visMode == 0) {
+        if (_fieldVisMode == 0) {
             float prop = CalculateDensity(localPos);
             if (prop < _target_density)
             {
@@ -193,17 +197,17 @@ Shader "Unlit/FluidSimDebugViz"
             {
                 col = _neutralPressureColor;
             }
-        } else if (_visMode == 1) {
+        } else if (_fieldVisMode == 1) {
             float prop = CalculatePressure(localPos);
             
             float t = inverseLerp(_min_pressure, _max_pressure, prop);
             col = lerp(_negativePressureColor,_positivePressureColor, t);
            
             //col = float4(1,prop*_DensityVizFactor,0,1);
-        } else if (_visMode == 2) {
+        } else if (_fieldVisMode == 2) {
             float2 prop = CalculatePressureGradient(localPos);
             col = fixed4(prop * _DensityVizFactor, 0, 1);
-        } else if (_visMode == 3)
+        } else if (_fieldVisMode == 3)
         {
             col = fixed4(0,0,0,1);
         }
@@ -226,8 +230,40 @@ Shader "Unlit/FluidSimDebugViz"
             
             if (distance(pos, localPos) <_circleSize / _scaling_factor)
             {
-                float pressure = _particle_pressures[i];
-                col = float4(0, pressure, 1, 1);
+                // Solid = 0,
+                // Pressure = 1,
+                // Velocity = 2,
+                switch (_particleVisMode)
+                {
+                    case 0:
+                    default:
+                    {
+                        col = float4(0, 1, 1, 1);
+                        break;
+                    }
+                    case 1:
+                    {
+                        float pressure = _particle_pressures[i];
+                        col = float4(0, pressure, 1, 1);
+                        break;
+                    }
+                    case 2:
+                    {
+                        float2 vel = float2(
+                            _particle_velocities[i*2],
+                            _particle_velocities[i*2+1]);
+                        float velMag = length(vel);
+                        //velMag *= .5;
+                        //velMag = velMag + _min_velocity;
+                        velMag = velMag / _max_velocity;
+                        //vel = 1 + vel * 0.5;
+                        col = float4(velMag, 0, 1-velMag, 1);
+                        break;
+                    }
+                        
+                }
+
+                
             }
         }
 
