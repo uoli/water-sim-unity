@@ -225,7 +225,7 @@ public class FluidSimViz : MonoBehaviour
         {
             var y = cellSize * i * m_ScalingFactor;
             var top = new Vector2(0, y);
-            var bottom = new Vector2(boundaries.yMax, y);
+            var bottom = new Vector2(boundaries.xMax, y);
             DrawLine(top, bottom, thickness, Color.gray);
         }
 
@@ -245,7 +245,7 @@ public class FluidSimViz : MonoBehaviour
         m_FluidSim.m_LookupHelper.GetParticlesAround(
             new Vector2(
                 selectedGrid.x * cellSize + cellSize * 0.5f,
-                (cellsHorizontalCount -1 - selectedGrid.y ) * cellSize + cellSize * 0.5f),
+                (cellsVerticalCount -1 - selectedGrid.y ) * cellSize + cellSize * 0.5f),
             particleIndexes
             );
         
