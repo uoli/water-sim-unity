@@ -24,10 +24,10 @@ Shader "Unlit/FluidSimDebugViz"
         float4 scrPos: UNITY_VPOS_TYPE ;
     };
 
-    StructuredBuffer<float> _particle_positions;
+    StructuredBuffer<float2> _particle_positions;
     StructuredBuffer<float> _particle_densities;
     StructuredBuffer<float> _particle_pressures;
-    StructuredBuffer<float> _particle_velocities;
+    StructuredBuffer<float2> _particle_velocities;
     int _PointCount;
     float _scaling_factor;
     float _sizex;
@@ -115,7 +115,7 @@ Shader "Unlit/FluidSimDebugViz"
         float density = 0;
         for (int i=0; i < _PointCount; i++)
         {
-            float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
+            float2 particlePos = _particle_positions[i];
             float squaredDist = squaredDistance(particlePos,pos);
             //float dst = distance(particlePos, pos);
             //float influence = SmoothingKernel(squaredDist);
@@ -131,7 +131,7 @@ Shader "Unlit/FluidSimDebugViz"
         float pressure = 0;
         for (int i=0; i < _PointCount; i++)
         {
-            float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
+            float2 particlePos = _particle_positions[i];
             float squaredDist = squaredDistance(particlePos,pos);
             //float dst = distance(particlePos, pos);
             //float influence = SmoothingKernel(squaredDist);
@@ -149,7 +149,7 @@ Shader "Unlit/FluidSimDebugViz"
         float2 pressureGradient = 0;
         for (int i = 0; i < _PointCount; i++)
         {
-            float2 particlePos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
+            float2 particlePos = _particle_positions[i];
             float sqrDst = squaredDistance(particlePos,pos );
             if (sqrDst < 0.001 || sqrDst > squared_smooth_length) continue;
             float2 dif = particlePos - pos;
@@ -226,7 +226,7 @@ Shader "Unlit/FluidSimDebugViz"
 
         for (int i = 0; i < _PointCount; i++)
         {
-            float2 pos = float2(_particle_positions[i*2], _particle_positions[i*2+1]);
+            float2 pos = _particle_positions[i];
             
             if (distance(pos, localPos) <_circleSize / _scaling_factor)
             {
@@ -249,9 +249,7 @@ Shader "Unlit/FluidSimDebugViz"
                     }
                     case 2:
                     {
-                        float2 vel = float2(
-                            _particle_velocities[i*2],
-                            _particle_velocities[i*2+1]);
+                        float2 vel = _particle_velocities[i];
                         float velMag = length(vel);
                         //velMag = velMag / _max_velocity;
                         velMag = log(velMag + 1) / log(_max_velocity + 1); // maps [0, maxValue] -> [0,1]

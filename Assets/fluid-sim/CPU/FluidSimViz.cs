@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using Unity.Collections;
 using Unity.Profiling;
 using UnityEditor;
@@ -28,7 +29,7 @@ public class FluidSimViz : MonoBehaviour
     public bool m_ShowVelocities = false;
     public bool m_ShowGrid = false;
     public bool m_ShowParticleOverlay = false;
-    public float m_velocityScale = 1.0f;
+    public float m_VelocityScale = 1.0f;
     public float m_DensityVizFactor = 1;
     public FieldVisualizationMode m_FieldVisualizationMode = FieldVisualizationMode.Density;
     public ParticleVisualizationMode m_ParticleVisualizationMode = ParticleVisualizationMode.Pressure;
@@ -39,10 +40,10 @@ public class FluidSimViz : MonoBehaviour
     
     IFluidSim m_FluidSim;
     
-    float[] m_PointPositionData;
+    Vector2[] m_PointPositionData;
     float[] m_PointDensitiesData;
     float[] m_PointPressureData;
-    float[] m_PointVelocityData;
+    Vector2[] m_PointVelocityData;
     ComputeBuffer m_PointBuffer;
     ComputeBuffer m_PointDensitiesBuffer;
     ComputeBuffer m_PointPressureBuffer;
@@ -90,24 +91,24 @@ public class FluidSimViz : MonoBehaviour
         if (m_PointBuffer == null || m_PointDensitiesBuffer.count != m_FluidSim.ParticleCount)
         {
             CleanupComputeBuffers();
-
-            m_PointPositionData = new float[m_FluidSim.ParticleCount * 2];
-            m_PointBuffer = new ComputeBuffer(m_PointPositionData.Length, sizeof(float));
+            
+            m_PointPositionData = new Vector2[m_FluidSim.ParticleCount];
+            m_PointBuffer = new ComputeBuffer(m_PointPositionData.Length, Marshal.SizeOf(typeof(Vector2)));
             m_PointDensitiesData = new float[m_FluidSim.ParticleCount];
             m_PointDensitiesBuffer = new ComputeBuffer(m_PointDensitiesData.Length, sizeof(float));
             m_PointPressureData = new float[m_FluidSim.ParticleCount];
             m_PointPressureBuffer = new ComputeBuffer(m_PointPressureData.Length, sizeof(float));
-            m_PointVelocityData = new float[m_FluidSim.ParticleCount*2];
-            m_PointVelocityBuffer = new ComputeBuffer(m_PointVelocityData.Length, sizeof(float));
+            m_PointVelocityData = new Vector2[m_FluidSim.ParticleCount];
+            m_PointVelocityBuffer = new ComputeBuffer(m_PointVelocityData.Length, Marshal.SizeOf(typeof(Vector2)));
         }
 
         var positions = m_FluidSim.GetPositions();
         for (var index = 0; index < m_FluidSim.ParticleCount; index++)
         {
             var position = positions[index];
-            m_PointPositionData[index * 2] = position.x;
-            m_PointPositionData[index * 2 + 1] = position.y;
+            m_PointPositionData[index] = position;
         }
+
         var densities = m_FluidSim.GetDensities();
         var maxDensity = 0f;
         for (var index = 0; index < m_FluidSim.ParticleCount; index++)
@@ -136,8 +137,7 @@ public class FluidSimViz : MonoBehaviour
         for (var index = 0; index < m_FluidSim.ParticleCount; index++)
         {
             var velocity = velocities[index];
-            m_PointVelocityData[index * 2] = velocity.x;
-            m_PointVelocityData[index * 2 + 1] = velocity.y;
+            m_PointVelocityData[index] = velocity;
             m_KineticEnergy += 0.5f * m_FluidSim.Mass * Vector2.Dot(velocity, velocity);
             minVelocity = Mathf.Min(velocity.sqrMagnitude, minVelocity);
             maxVelocity = Mathf.Max(velocity.sqrMagnitude, maxVelocity);
@@ -283,7 +283,7 @@ public class FluidSimViz : MonoBehaviour
             velocity.y *= -1;
             if (m_ShowParticleOverlay)
                 DrawCircle(position, m_CircleSize , circleColor);
-            DrawArrow(position, velocity * m_velocityScale, Color.green);
+            DrawArrow(position, velocity * m_VelocityScale, Color.green);
         }
 
         particleIndexes.Dispose();

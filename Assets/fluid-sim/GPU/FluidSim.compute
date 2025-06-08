@@ -16,11 +16,11 @@ struct SpatialEntryData
 };
 
 
-RWStructuredBuffer<float> Positions;
+RWStructuredBuffer<float2> Positions;
 RWStructuredBuffer<float2> PredictedPositions;
 RWStructuredBuffer<float> Densities;
 RWStructuredBuffer<float> Pressure;
-RWStructuredBuffer<float> Velocity;
+RWStructuredBuffer<float2> Velocity;
 RWStructuredBuffer<float> DebugBuff;
 RWStructuredBuffer<SpatialEntryData> SpatialEntry;
 RWStructuredBuffer<int> StartIndices;
@@ -149,8 +149,8 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
 void ComputePredictedPositions (uint3 id : SV_DispatchThreadID)
 {
     uint index = id.x;
-    float2 position = float2(Positions[index*2], Positions[index*2+1]);
-    float2 velocity = float2(Velocity[index*2], Velocity[index*2+1]);
+    float2 position = Positions[index];
+    float2 velocity = Velocity[index];
     PredictedPositions[index] = position + velocity * DeltaTime;
 }
 
@@ -254,8 +254,7 @@ void ComputePressureForce (uint3 id : SV_DispatchThreadID)
     float2 pressureAcceleration = pressureForce / density;
     float2 velocity = pressureAcceleration * DeltaTime;
     
-    Velocity[index * 2] += velocity.x;
-    Velocity[index * 2 + 1] += velocity.y;
+    Velocity[index] += velocity;
 }
 
 [numthreads(64,1,1)]
@@ -263,8 +262,8 @@ void ComputePositionFromVelocityAndHandleCollision(uint3 id : SV_DispatchThreadI
 {
     int index = id.x;
 
-    float2 position = float2(Positions[index*2], Positions[index*2 + 1]);
-    float2 velocity = float2(Velocity[index*2], Velocity[index*2 + 1]);
+    float2 position = Positions[index];
+    float2 velocity = Velocity[index];
     position += velocity * DeltaTime;
             
     if (position.x < SmoothingRadius)
@@ -309,8 +308,7 @@ void ComputePositionFromVelocityAndHandleCollision(uint3 id : SV_DispatchThreadI
             velocity.y *= -CollisionDamping;
         }
     }
-    Positions[index*2] = position.x;
-    Positions[index*2+1] = position.y;
-    Velocity[index*2] = velocity.x;
-    Velocity[index*2+1] = velocity.y;
+    Positions[index] = position;
+    Positions[index] = position;
+    Velocity[index] = velocity;
 }

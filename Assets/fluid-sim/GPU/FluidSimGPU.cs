@@ -3,8 +3,15 @@ using System.Runtime.InteropServices;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
+
+[Serializable]
+[StructLayout(LayoutKind.Sequential, Pack = 1)] 
+struct SpatialEntry
+{
+    internal uint index;
+    internal uint cellKey;
+} 
 
 public class FluidSimGPU : MonoBehaviour, IFluidSim
 {
@@ -20,41 +27,25 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float DeltaTime = 0.001f;
     public float BoundaryPushStrength = 0;
     public float CollisionDamping = 0.5f;
-
-    NativeArray<Vector2> m_Position;
-    NativeArray<Vector2> m_PredictedPosition;
-    NativeArray<float> m_Density;
-    NativeArray<float> m_Pressure;
-    NativeArray<Vector2> m_Velocity;
     
-    float[] m_PointPositionData;
+    Vector2[] m_PointPositionData;
     float[] m_PointDensitiesData;
     float[] m_PointPressureData;
-    float[] m_PointVelocityData;
-    float[] m_PredictedPositionData;
+    Vector2[] m_PointVelocityData;
+    Vector2[] m_PredictedPositionData;
     ComputeBuffer m_PointBuffer;
     ComputeBuffer m_PredictedPositionBuffer;
     ComputeBuffer m_PointDensitiesBuffer;
     ComputeBuffer m_PointPressureBuffer;
     ComputeBuffer m_PointVelocityBuffer;
     
-    [Serializable]
-    [StructLayout(LayoutKind.Sequential, Pack = 1)] 
-    struct SpatialEntry
-    {
-        internal uint index;
-        internal uint cellKey;
-    } 
     SpatialEntry[] m_SpatialEntry;
     int[] m_StartIndices;
     ComputeBuffer m_SpatialEntryBuffer;
     ComputeBuffer m_StartIndicesBuffer;
-
     
     float[] m_DebugData;
     ComputeBuffer m_DebugBuffer;
-
-    
 
     int IFluidSim.ParticleCount => ParticleCount;
     float IFluidSim.Mass => Mass;
@@ -63,10 +54,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     float IFluidSim.SmoothingRadius => SmoothingRadius;
     float IFluidSim.TargetDensity => TargetDensity;
     public GridSpatialLookup LookupHelper => throw new NotImplementedException();
-    public ReadOnlySpan<Vector2> GetPositions() { return m_Position; }
-    public ReadOnlySpan<float> GetDensities() { return m_Density; }
-    public ReadOnlySpan<float> GetPressures() { return m_Pressure; }
-    public ReadOnlySpan<Vector2> GetVelocities() { return m_Velocity; }
+    public ReadOnlySpan<Vector2> GetPositions() { return m_PointPositionData.AsSpan(); }
+    public ReadOnlySpan<float> GetDensities() { return m_PointDensitiesData; }
+    public ReadOnlySpan<float> GetPressures() { return m_PointPressureData; }
+    public ReadOnlySpan<Vector2> GetVelocities() { return m_PointVelocityData; }
 
     void OnEnable()
     {
@@ -75,93 +66,70 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
 
     void OnDisable()
     {
-        CleanupParticles();
         CleanupComputeBuffers();
-    }
-    
-    void CleanupParticles()
-    {
-        if (m_Position.IsCreated) 
-            m_Position.Dispose();
-        if (m_Density.IsCreated)
-            m_Density.Dispose();
-        if (m_Pressure.IsCreated)
-            m_Pressure.Dispose();
-        if (m_Velocity.IsCreated)
-            m_Velocity.Dispose();
-        if(m_PredictedPosition.IsCreated)
-            m_PredictedPosition.Dispose();
     }
 
     void InitParticleData()
     {
-        CleanupParticles();
         CleanupComputeBuffers();
-        m_Position = new NativeArray<Vector2>(ParticleCount, Allocator.Persistent);
-        m_PredictedPosition = new NativeArray<Vector2>(ParticleCount, Allocator.Persistent);
-        m_Density = new NativeArray<float>(ParticleCount, Allocator.Persistent);
-        m_Pressure = new NativeArray<float>(ParticleCount, Allocator.Persistent);
-        m_Velocity = new NativeArray<Vector2>(ParticleCount, Allocator.Persistent);
-        m_PointPositionData = new float[ParticleCount * 2];
+        m_PointPositionData = new Vector2[ParticleCount];
         m_PointDensitiesData = new float[ParticleCount];
         m_PointPressureData = new float[ParticleCount];
-        m_PointVelocityData = new float[ParticleCount * 2];
+        m_PointVelocityData = new Vector2[ParticleCount];
         m_SpatialEntry = new SpatialEntry[ParticleCount];
         m_StartIndices= new int[ParticleCount];
         m_DebugData = new float[ParticleCount];
-        m_PredictedPositionData = new float[ParticleCount*2];
+        m_PredictedPositionData = new Vector2[ParticleCount];
 
         for ( var i = 0; i < ParticleCount; i++ )
         {
             var position = new Vector2(Random.Range(0f, Width), Random.Range(0f, Height));
-            m_Position[i] = position;
-            m_PredictedPosition[i] = position;
-            m_Density[i] = 0;
-            m_Pressure[i] = 0;
-            m_Velocity[i] = Vector2.zero;
       
-            m_PointPositionData[i*2] = position.x;
-            m_PointPositionData[i*2 + 1] = position.y;
+            m_PointPositionData[i] = position;
             m_PointDensitiesData[i] = 0;
             m_PointPressureData[i] = 0;
-            m_PointVelocityData[i*2] = 0;
-            m_PointVelocityData[i*2 + 1] = 0;
+            m_PointVelocityData[i] = Vector2.zero;
 
             m_DebugData[i] = 0;
         }
-        m_PointBuffer = new ComputeBuffer(m_PointPositionData.Length, sizeof(float));
-        m_PredictedPositionBuffer = new ComputeBuffer(ParticleCount, sizeof(float)*2);
-        m_PointDensitiesBuffer = new ComputeBuffer(m_PointDensitiesData.Length, sizeof(float));
-        m_PointPressureBuffer = new ComputeBuffer(m_PointPressureData.Length, sizeof(float));
-        m_PointVelocityBuffer = new ComputeBuffer(m_PointVelocityData.Length, sizeof(float));
+        m_PointBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
+        m_PredictedPositionBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
+        m_PointDensitiesBuffer = new ComputeBuffer(ParticleCount, sizeof(float));
+        m_PointPressureBuffer = new ComputeBuffer(ParticleCount, sizeof(float));
+        m_PointVelocityBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
         m_PointBuffer.SetData(m_PointPositionData);
         m_PointDensitiesBuffer.SetData(m_PointDensitiesData);
         m_PointPressureBuffer.SetData(m_PointDensitiesData);
         m_PointVelocityBuffer.SetData(m_PointVelocityData);
         m_PredictedPositionBuffer.SetData(m_PredictedPositionData);
         
-        m_DebugBuffer = new ComputeBuffer(m_DebugData.Length, sizeof(float));
-        m_DebugBuffer.SetData(m_DebugData);
-        
         var size = Marshal.SizeOf(typeof(SpatialEntry));
         m_SpatialEntryBuffer = new ComputeBuffer(ParticleCount, size);
-        m_SpatialEntryBuffer.SetData(m_SpatialEntry);
-        
         m_StartIndicesBuffer = new ComputeBuffer(ParticleCount, sizeof(int));
+        m_SpatialEntryBuffer.SetData(m_SpatialEntry);
         m_StartIndicesBuffer.SetData(m_StartIndices);
-
-
+        
+        m_DebugBuffer = new ComputeBuffer(m_DebugData.Length, sizeof(float));
+        m_DebugBuffer.SetData(m_DebugData);
     }
     void CleanupComputeBuffers()
     {
         if (m_PointBuffer != null)
             m_PointBuffer.Release();
+        if (m_PredictedPositionBuffer != null)
+            m_PredictedPositionBuffer.Release();
         if (m_PointDensitiesBuffer != null)
             m_PointDensitiesBuffer.Release();
         if (m_PointPressureBuffer != null)
             m_PointPressureBuffer.Release();
         if (m_PointVelocityBuffer != null)
             m_PointVelocityBuffer.Release();
+
+        if (m_SpatialEntryBuffer != null)
+            m_SpatialEntryBuffer.Release();
+        if (m_StartIndicesBuffer != null)
+            m_StartIndicesBuffer.Release();
+        
         if (m_DebugBuffer != null)
             m_DebugBuffer.Release();
     }
@@ -185,7 +153,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("SquaredSmoothingRadius", SmoothingRadius * SmoothingRadius);
         SimComputeShader.SetFloat("DeltaTime", DeltaTime);
         SimComputeShader.SetFloat("BoundaryPushStrength", BoundaryPushStrength);
-        SimComputeShader.SetFloat("CollisionDamping", CollisionDamping);
+        SimComputeShader.SetFloat("CollisionDamping", CollisionDamping); 
         
         //Predicted Positions
         var kernelIndex0 = SimComputeShader.FindKernel("ComputePredictedPositions");
@@ -253,7 +221,6 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetBuffer(kernelIndex3, "DebugBuff", m_DebugBuffer);
         threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
         SimComputeShader.Dispatch(kernelIndex3, threadGroupsX,1,1);
-
         
         m_PointBuffer.GetData(m_PointPositionData);
         m_PointDensitiesBuffer.GetData(m_PointDensitiesData);
@@ -264,12 +231,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_SpatialEntryBuffer.GetData(m_SpatialEntry);
         m_PredictedPositionBuffer.GetData(m_PredictedPositionData);
 
-        for (var i = 0; i < m_Position.Length; i++)
+        for (var i = 0; i < ParticleCount; i++)
         {
-            m_Position[i] = new Vector2(m_PointPositionData[i*2], m_PointPositionData[i*2 + 1]);
-            m_Density[i] = m_PointDensitiesData[i];
-            m_Pressure[i] = m_PointPressureData[i];
-            m_Velocity[i] = new Vector2(m_PointVelocityData[i*2], m_PointVelocityData[i*2 + 1]);
             if (m_DebugData[i] != 0)
             {
                 EditorApplication.isPaused = true;
@@ -333,10 +296,6 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         // Cleanup
         bufferA.Dispose();
         bufferB.Dispose();
-    }
-    static void Swap(ref ComputeBuffer a, ref ComputeBuffer b)
-    {
-        (a, b) = (b, a);
     }
 
     public void Interact(Vector2 mouseInSimulationSpace, float scalingFactor, InteractionDirection interactionDirection)
