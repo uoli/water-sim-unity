@@ -21,12 +21,16 @@
             #pragma fragment frag
             #pragma multi_compile_instancing
             #include "UnityCG.cginc"
+            #include "vizCommon.cginc"
 
             UNITY_INSTANCING_BUFFER_START(Props)
                 UNITY_DEFINE_INSTANCED_PROP(float4, _Color)
             UNITY_INSTANCING_BUFFER_END(Props)
 
             StructuredBuffer<float2> positions;
+            StructuredBuffer<float> _particle_densities;
+            StructuredBuffer<float> _particle_pressures;
+            StructuredBuffer<float2> _particle_velocities;
             float circle_size;
             float scaling_factor;
             float sim_height;
@@ -34,6 +38,10 @@
             float4 world_origin;
             float display_area_width;
             float display_area_height;
+            int _particleVisMode;
+            float _max_velocity;
+
+
             
             struct appdata
             {
@@ -72,14 +80,16 @@
                 // float2 vertexClip = centerClip + offset;
                 // float4 fvertex = float4(vertexClip, 0.5, 1);
 
-                float4 color = _Color;
+                fixed4 color = _Color;
                 
                 v2f o;
                 UNITY_TRANSFER_INSTANCE_ID(v, o);
                 o.vertex = fvertex;
-                o.color = color;
                 o.local_position = v.vertex;
-
+                
+                color = GetPointColor(_particleVisMode, _particle_pressures[instanceID],  _particle_velocities[instanceID],  _max_velocity);
+                o.color = color;
+                
                 return o;
             }
 

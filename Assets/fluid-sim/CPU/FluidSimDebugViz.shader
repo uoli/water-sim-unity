@@ -8,6 +8,8 @@ Shader "Unlit/FluidSimDebugViz"
     #pragma target 3.0
 
     #include "UnityCG.cginc"
+    #include "vizCommon.cginc"
+
 
     struct appdata
     {
@@ -181,6 +183,7 @@ Shader "Unlit/FluidSimDebugViz"
         _min_pressure = min(_min_pressure, -1);
 
         fixed4 col;
+
         if (_fieldVisMode == 0) {
             float prop = CalculateDensity(localPos);
             if (prop < _target_density)
@@ -230,37 +233,7 @@ Shader "Unlit/FluidSimDebugViz"
             
             if (distance(pos, localPos) <_circleSize / _scaling_factor)
             {
-                // Solid = 0,
-                // Pressure = 1,
-                // Velocity = 2,
-                switch (_particleVisMode)
-                {
-                    case 0:
-                    default:
-                    {
-                        col = float4(0, 1, 1, 1);
-                        break;
-                    }
-                    case 1:
-                    {
-                        float pressure = _particle_pressures[i];
-                        col = float4(0, pressure, 1, 1);
-                        break;
-                    }
-                    case 2:
-                    {
-                        float2 vel = _particle_velocities[i];
-                        float velMag = length(vel);
-                        //velMag = velMag / _max_velocity;
-                        velMag = log(velMag + 1) / log(_max_velocity + 1); // maps [0, maxValue] -> [0,1]
-                        //velMag = pow(velMag / _max_velocity, 2);
-                        col = float4(velMag, 0, 1-velMag, 1);
-                        break;
-                    }
-                        
-                }
-
-                
+                col = GetPointColor(_particleVisMode, _particle_pressures[i],  _particle_velocities[i],  _max_velocity);
             }
         }
 

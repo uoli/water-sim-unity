@@ -201,7 +201,7 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_min_velocity", minVelocity);
 
         if (m_ShowParticles)
-            RenderPointsGPU();
+            RenderPointsGPU(maxVelocity);
         
         if (m_MousePressed)
             m_FluidSim.Interact(mouseInSimulationSpace, m_MouseRadius / m_ScalingFactor, m_InteractionDirection);
@@ -231,7 +231,7 @@ public class FluidSimViz : MonoBehaviour
         Destroy(m_PointMesh);
     }
 
-    void RenderPointsGPU()
+    void RenderPointsGPU(float maxVelocity)
     {
         
         m_PointRenderArgsData[1] = (uint)m_FluidSim.ParticleCount;
@@ -239,12 +239,18 @@ public class FluidSimViz : MonoBehaviour
 
         var fourCorners = new Vector3[4];
         m_RectTransform.GetWorldCorners(fourCorners);
+        
+        m_PointInstancedMaterial.SetBuffer("positions", m_PointBuffer); 
+        m_PointInstancedMaterial.SetBuffer("_particle_densities", m_PointDensitiesBuffer);
+        m_PointInstancedMaterial.SetBuffer("_particle_pressures", m_PointPressureBuffer);
+        m_PointInstancedMaterial.SetBuffer("_particle_velocities", m_PointVelocityBuffer);
+        m_PointInstancedMaterial.SetFloat("_max_velocity", maxVelocity);
+        m_PointInstancedMaterial.SetInt("_particleVisMode", (int)m_ParticleVisualizationMode);
             
         m_PointInstancedMaterial.SetVector("world_origin", fourCorners[0]);
         m_PointInstancedMaterial.SetFloat("display_area_width", m_RectTransform.rect.width);
         m_PointInstancedMaterial.SetFloat("display_area_height", m_RectTransform.rect.height);
 
-        m_PointInstancedMaterial.SetBuffer("positions", m_PointBuffer); 
         m_PointInstancedMaterial.SetInt("point_count", m_FluidSim.ParticleCount);
         m_PointInstancedMaterial.SetFloat("sim_width", m_FluidSim.Width);
         m_PointInstancedMaterial.SetFloat("sim_height", m_FluidSim.Height);
