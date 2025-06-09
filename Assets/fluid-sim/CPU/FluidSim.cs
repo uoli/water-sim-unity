@@ -186,6 +186,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
         CalculateParticlePressure();
         SimulateStep(stepTime);
         m_MouseRadius = 0; //clear mouse interaction
+
+        m_PositionComputeBuffer.Update(m_Position);
+        m_DensityComputeBuffer .Update(m_Density);
+        m_PressureComputeBuffer.Update(m_Pressure);
+        m_VelocitiesComputeBuffer .Update(m_Velocity);
     }
 
     public void Interact(Vector2 position, float radius, InteractionDirection direction)

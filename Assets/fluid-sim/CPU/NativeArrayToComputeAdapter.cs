@@ -18,5 +18,10 @@ public struct NativeArrayToComputeAdapter<T> : IDisposable where T : struct
     {
         m_ComputeBuffer?.Dispose();
     }
+    public void Update(NativeArray<T> data)
+    {
+        m_ComputeBuffer.SetData(data);
+
+    }
 }
 

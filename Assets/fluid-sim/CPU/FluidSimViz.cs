@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.InteropServices;
 using Unity.Collections;
 using Unity.Profiling;
 using UnityEditor;
@@ -41,8 +40,9 @@ public class FluidSimViz : MonoBehaviour
 {
     public float m_ScalingFactor = 1.0f;
     public Texture2D m_CircleTexture;
-    public Material m_FluidMaterialDebugViz;
-    public Material m_PointInstancedMaterial;
+    public Shader m_FluidMaterialDebugShader;
+    public Shader m_PointInstancedShader;
+    public MeshRenderer m_FluidMeshRenderer;
     public bool m_UseDynamicRanges = false;
     public float m_CircleSize = 10;
     public bool m_ShowVelocities = false;
@@ -58,7 +58,8 @@ public class FluidSimViz : MonoBehaviour
     public float m_MouseRadius = 1.0f;
     public VisualizationRanges m_Ranges = new VisualizationRanges();
     
-    
+    Material m_PointInstancedMaterial;
+    Material m_FluidMaterialDebugViz;
     Mesh m_PointMesh;
     ComputeBuffer m_PointRenderArgsBuffer;
     uint[] m_PointRenderArgsData;
@@ -96,12 +97,18 @@ public class FluidSimViz : MonoBehaviour
     void OnEnable()
     {
         m_FluidSim = GetComponent<IFluidSim>() as IFluidSim;
+        m_PointInstancedMaterial = new Material(m_PointInstancedShader);
+        m_FluidMaterialDebugViz = new Material(m_FluidMaterialDebugShader);
+        m_FluidMeshRenderer.material = m_FluidMaterialDebugViz;
         InitializePointInstancedRender();
     }
 
     void OnDisable()
     {
         CleanupPointInstancedRender();
+        m_FluidMeshRenderer.material = null;
+        Destroy(m_FluidMaterialDebugViz);
+        Destroy(m_PointInstancedMaterial);
     }
 
     void OnDestroy() {}
