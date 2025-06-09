@@ -359,7 +359,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   SimComputeShader: {fileID: 7200000, guid: 47a5eccea77b2bf4ca77adc4d12d562f, type: 3}
   SortComputeShader: {fileID: 7200000, guid: cae7e393630646ab95afb5834be1888b, type: 3}
-  ParticleCount: 1000
+  ParticleCount: 5000
   Width: 100
   Height: 100
   Mass: 1
@@ -407,6 +407,7 @@ MonoBehaviour:
   m_CircleTexture: {fileID: 2800000, guid: 810fda614b13807479b5eae6ca3a5273, type: 3}
   m_FluidMaterialDebugViz: {fileID: 2100000, guid: 3d457eca536bc2e418f09bb367bb7858, type: 2}
   m_PointInstancedMaterial: {fileID: 2100000, guid: 098ace941a271584a803fc0205e25531, type: 2}
+  m_UseDynamicRanges: 1
   m_CircleSize: 1
   m_ShowVelocities: 0
   m_ShowGrid: 0
@@ -419,6 +420,12 @@ MonoBehaviour:
   m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
   m_PositivePressureColor: {r: 1, g: 0, b: 0, a: 0}
   m_MouseRadius: 30
+  m_Ranges:
+    minPressure: 0
+    maxDensity: 0
+    maxVelocity: 0
+    minVelocity: 0
+    maxPressure: 0
 --- !u!1 &604712593
 GameObject:
   m_ObjectHideFlags: 0
@@ -887,6 +894,7 @@ MonoBehaviour:
   m_CircleTexture: {fileID: 2800000, guid: 810fda614b13807479b5eae6ca3a5273, type: 3}
   m_FluidMaterialDebugViz: {fileID: 2100000, guid: 3d457eca536bc2e418f09bb367bb7858, type: 2}
   m_PointInstancedMaterial: {fileID: 0}
+  m_UseDynamicRanges: 0
   m_CircleSize: 1
   m_ShowVelocities: 0
   m_ShowGrid: 0
@@ -899,6 +907,12 @@ MonoBehaviour:
   m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
   m_PositivePressureColor: {r: 0.735849, g: 0, b: 0, a: 0}
   m_MouseRadius: 20
+  m_Ranges:
+    minPressure: 0
+    maxDensity: 0
+    maxVelocity: 0
+    minVelocity: 0
+    maxPressure: 0
 --- !u!114 &2014640969
 MonoBehaviour:
   m_ObjectHideFlags: 0

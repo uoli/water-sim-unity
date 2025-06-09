@@ -51,6 +51,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     Vector2 m_ExternalForceCenter;
     float m_ExternalForceRadius;
     InteractionDirection m_InteractionDirection;
+    IFluidSim m_FluidSimImplementation;
 
     int IFluidSim.ParticleCount => ParticleCount;
     float IFluidSim.Mass => Mass;
@@ -58,11 +59,13 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     int IFluidSim.Width => Width;
     float IFluidSim.SmoothingRadius => SmoothingRadius;
     float IFluidSim.TargetDensity => TargetDensity;
+    public bool HasDataInCompute => true;
     public GridSpatialLookup LookupHelper => throw new NotImplementedException();
-    public ReadOnlySpan<Vector2> GetPositions() { return m_PointPositionData.AsSpan(); }
-    public ReadOnlySpan<float> GetDensities() { return m_PointDensitiesData; }
-    public ReadOnlySpan<float> GetPressures() { return m_PointPressureData; }
-    public ReadOnlySpan<Vector2> GetVelocities() { return m_PointVelocityData; }
+    public ComputeBuffer GetDensities() { return m_PointDensitiesBuffer; }
+    public ComputeBuffer GetPressures() { return m_PointPressureBuffer; }
+    public ComputeBuffer GetVelocities() { return m_PointVelocityBuffer; }
+    
+    public ComputeBuffer GetPositionComputeBuffer() { return m_PointBuffer; }
 
     void OnEnable()
     {
@@ -241,6 +244,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
         SimComputeShader.Dispatch(kernelIndex3, threadGroupsX,1,1);
         
+        /*
         m_PointBuffer.GetData(m_PointPositionData);
         m_PointDensitiesBuffer.GetData(m_PointDensitiesData);
         m_PointPressureBuffer.GetData(m_PointPressureData);
@@ -249,7 +253,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_StartIndicesBuffer.GetData(m_StartIndices);
         m_SpatialEntryBuffer.GetData(m_SpatialEntry);
         m_PredictedPositionBuffer.GetData(m_PredictedPositionData);
-
+*/
         m_ExternalForceRadius = 0; //clear External Force interaction
 
         

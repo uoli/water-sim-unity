@@ -42,17 +42,22 @@ public class FluidSim : MonoBehaviour, IFluidSim
     Vector2 m_MousePosition;
     float m_MouseRadius;
     InteractionDirection m_InteractionDirection;
+    NativeArrayToComputeAdapter<Vector2> m_PositionComputeBuffer;
+    NativeArrayToComputeAdapter<float> m_DensityComputeBuffer;
+    NativeArrayToComputeAdapter<float> m_PressureComputeBuffer;
+    NativeArrayToComputeAdapter<Vector2> m_VelocitiesComputeBuffer;
 
     static readonly ProfilerMarker s_UpdatePerfMarker = new ProfilerMarker("FluidSim.Update");
     static readonly ProfilerMarker s_StepPerfMarker = new ProfilerMarker("FluidSim.Step");
     static readonly ProfilerMarker s_PressurePerfMarker = new ProfilerMarker("FluidSim.PressureCalc");
     static readonly ProfilerMarker s_DensityPerfMarker = new ProfilerMarker("FluidSim.DensityeCalc");
 
+    public bool HasDataInCompute => false;
     public GridSpatialLookup LookupHelper => throw new NotImplementedException();
-    public ReadOnlySpan<Vector2> GetPositions() { return m_Position.AsReadOnlySpan(); }
-    public ReadOnlySpan<float> GetDensities() { return m_Density.AsReadOnlySpan(); }
-    public ReadOnlySpan<float> GetPressures() { return m_Pressure.AsReadOnlySpan(); }
-    public ReadOnlySpan<Vector2> GetVelocities() { return m_Velocity.AsReadOnlySpan(); }
+    public ComputeBuffer GetPositionComputeBuffer() { return m_PositionComputeBuffer.Buffer; }
+    public ComputeBuffer GetDensities() { return m_DensityComputeBuffer.Buffer; }
+    public ComputeBuffer GetPressures() { return m_PressureComputeBuffer.Buffer; }
+    public ComputeBuffer GetVelocities() { return m_VelocitiesComputeBuffer.Buffer; }
     public int ParticleCount => m_ParticleCount;
     float IFluidSim.Mass => Mass;
     public int Height => height;
@@ -84,6 +89,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
             m_Velocity.Dispose();
         if(m_PredictedPosition.IsCreated)
             m_PredictedPosition.Dispose();
+        
+        m_PositionComputeBuffer.Dispose();
+        m_DensityComputeBuffer.Dispose();
+        m_PressureComputeBuffer.Dispose();
+        m_VelocitiesComputeBuffer.Dispose();
     }
 
     void CleanupSpatialAcceleration()
@@ -115,6 +125,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
             m_Pressure[i] = 0;
             m_Velocity[i] = Vector2.zero;
         }
+        
+        m_PositionComputeBuffer = new NativeArrayToComputeAdapter<Vector2>(m_Position);
+        m_DensityComputeBuffer = new NativeArrayToComputeAdapter<float>(m_Density);
+        m_PressureComputeBuffer = new NativeArrayToComputeAdapter<float>(m_Pressure);
+        m_VelocitiesComputeBuffer = new NativeArrayToComputeAdapter<Vector2>(m_Velocity);
         
     }
     
@@ -179,7 +194,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
         m_MouseRadius = radius;
         m_InteractionDirection = direction;
     }
-    
+
     [BurstCompile]
     struct PredictPositionJob : IJobFor
     {
