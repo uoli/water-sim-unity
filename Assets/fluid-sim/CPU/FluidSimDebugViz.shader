@@ -215,8 +215,6 @@ Shader "Unlit/FluidSimDebugViz"
             col = fixed4(0,0,0,1);
         }
 
-        
-
         if (_mousepressed)
         {
             float2 pos = mouse;
@@ -225,15 +223,17 @@ Shader "Unlit/FluidSimDebugViz"
                 col.b = 1;
             }
         }
-        
 
-        for (int i = 0; i < _PointCount; i++)
+        if (_circleSize > 0)
         {
-            float2 pos = _particle_positions[i];
-            
-            if (distance(pos, localPos) <_circleSize / _scaling_factor)
+            for (int i = 0; i < _PointCount; i++)
             {
-                col = GetPointColor(_particleVisMode, _particle_pressures[i],  _particle_velocities[i],  _max_velocity);
+                float2 pos = _particle_positions[i];
+            
+                if (distance(pos, localPos) <_circleSize / _scaling_factor)
+                {
+                    col = GetPointColor(_particleVisMode, _particle_pressures[i],  _particle_velocities[i],  _max_velocity);
+                }
             }
         }
 

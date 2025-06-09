@@ -27,6 +27,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float DeltaTime = 0.001f;
     public float BoundaryPushStrength = 0;
     public float CollisionDamping = 0.5f;
+    public float ExternalForceStrength = 10f;
+    public float Gravity = 9.8f;
     
     Vector2[] m_PointPositionData;
     float[] m_PointDensitiesData;
@@ -46,6 +48,9 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     
     float[] m_DebugData;
     ComputeBuffer m_DebugBuffer;
+    Vector2 m_ExternalForceCenter;
+    float m_ExternalForceRadius;
+    InteractionDirection m_InteractionDirection;
 
     int IFluidSim.ParticleCount => ParticleCount;
     float IFluidSim.Mass => Mass;
@@ -142,6 +147,12 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         {
             InitParticleData();
         }
+
+        var externalForceStrength = ExternalForceStrength;
+        if (m_InteractionDirection == InteractionDirection.Repel)
+        {
+            externalForceStrength *= -1;
+        }
         
         SimComputeShader.SetFloat("ParticleCount", ParticleCount);
         SimComputeShader.SetFloat("Mass", Mass);
@@ -154,6 +165,11 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("DeltaTime", DeltaTime);
         SimComputeShader.SetFloat("BoundaryPushStrength", BoundaryPushStrength);
         SimComputeShader.SetFloat("CollisionDamping", CollisionDamping); 
+        SimComputeShader.SetFloat("ForceRadius", m_ExternalForceRadius); 
+        SimComputeShader.SetFloat("ForceCenterX", m_ExternalForceCenter.x);
+        SimComputeShader.SetFloat("ForceCenterY", m_ExternalForceCenter.y);
+        SimComputeShader.SetFloat("ForceStrength", externalForceStrength); 
+        SimComputeShader.SetFloat("Gravity", Gravity); 
         
         //Predicted Positions
         var kernelIndex0 = SimComputeShader.FindKernel("ComputePredictedPositions");
@@ -234,6 +250,9 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_SpatialEntryBuffer.GetData(m_SpatialEntry);
         m_PredictedPositionBuffer.GetData(m_PredictedPositionData);
 
+        m_ExternalForceRadius = 0; //clear External Force interaction
+
+        
         for (var i = 0; i < ParticleCount; i++)
         {
             if (m_DebugData[i] != 0)
@@ -301,8 +320,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         bufferB.Dispose();
     }
 
-    public void Interact(Vector2 mouseInSimulationSpace, float scalingFactor, InteractionDirection interactionDirection)
+    public void Interact(Vector2 mouseInSimulationSpace, float radius, InteractionDirection interactionDirection)
     {
-        //throw new NotImplementedException();
+        m_ExternalForceCenter = mouseInSimulationSpace;
+        m_ExternalForceRadius = radius;
+        m_InteractionDirection = interactionDirection;
     }
 }

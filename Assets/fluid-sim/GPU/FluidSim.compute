@@ -35,6 +35,12 @@ float SquaredSmoothingRadius;
 float DeltaTime;
 float BoundaryPushStrength;
 float CollisionDamping;
+float ForceRadius;
+float ForceCenterX;
+float ForceCenterY;
+float ForceStrength;
+float Gravity;
+
 
 int2 PositionToCell(float2 position)
 {
@@ -244,6 +250,19 @@ float2 CalculatePressureGradient(uint i) {
     return pressureGradient;
 }
 
+float2 InteractionForce(float2 particlePosition, float2 particleVelocity, float2 forceCenter, float radius, float strength)
+{
+    float2 diff = forceCenter - particlePosition;
+    float sqrDistance = dot(diff,diff);
+            
+    if (sqrDistance > radius * radius) return 0;
+            
+    float distance = sqrt(sqrDistance);
+    float2 dirToInputPoint = distance <= EPSILON ? 0 : diff/distance;
+    float centerT = 1 - distance / radius;
+    return  (dirToInputPoint * strength - particleVelocity) * centerT;
+}
+
 [numthreads(64,1,1)]
 void ComputePressureForce (uint3 id : SV_DispatchThreadID)
 {
@@ -252,9 +271,20 @@ void ComputePressureForce (uint3 id : SV_DispatchThreadID)
     float density = Densities[index]; 
     float2 pressureForce = CalculatePressureGradient(index);
     float2 pressureAcceleration = pressureForce / density;
-    float2 velocity = pressureAcceleration * DeltaTime;
+
+    float2 interactionAcceleration = 0;
+            
+    if (ForceRadius > 0)
+        interactionAcceleration = InteractionForce(
+            PredictedPositions[index],
+            Velocity[index],
+            float2(ForceCenterX,ForceCenterY),
+            ForceRadius,
+            ForceStrength);
+            
+    float2 gravityAcceleration = (float2(0,-1) * Gravity + interactionAcceleration) / density;
     
-    Velocity[index] += velocity;
+    Velocity[index] += (pressureAcceleration + gravityAcceleration + interactionAcceleration) * DeltaTime;
 }
 
 [numthreads(64,1,1)]
