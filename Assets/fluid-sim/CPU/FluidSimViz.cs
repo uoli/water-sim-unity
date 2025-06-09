@@ -4,6 +4,8 @@ using Unity.Collections;
 using Unity.Profiling;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
 
 public enum FieldVisualizationMode
@@ -32,6 +34,8 @@ public class FluidSimViz : MonoBehaviour
     public bool m_ShowVelocities = false;
     public bool m_ShowGrid = false;
     public bool m_ShowParticleOverlay = false;
+    [FormerlySerializedAs("m_ShowGpuParticles")]
+    public bool m_ShowParticles;
     public float m_VelocityScale = 1.0f;
     public float m_DensityVizFactor = 1;
     public FieldVisualizationMode m_FieldVisualizationMode = FieldVisualizationMode.Density;
@@ -46,6 +50,7 @@ public class FluidSimViz : MonoBehaviour
     uint[] m_PointRenderArgsData;
     
     IFluidSim m_FluidSim;
+    RectTransform m_RectTransform;
     
     Vector2[] m_PointPositionData;
     float[] m_PointDensitiesData;
@@ -68,7 +73,7 @@ public class FluidSimViz : MonoBehaviour
     
     void Start()
     {
-        
+        m_RectTransform = GetComponent<RectTransform>();
     }
 
     void OnEnable()
@@ -174,8 +179,8 @@ public class FluidSimViz : MonoBehaviour
         var mouseInSimulationSpace = new Vector2(m_MousePos.x / m_ScalingFactor,
         m_FluidSim.Height - m_MousePos.y / m_ScalingFactor);
 
-        m_FluidMaterialDebugViz.SetFloat("_sizex", m_FluidSim.Width);
-        m_FluidMaterialDebugViz.SetFloat("_sizey", m_FluidSim.Height);
+        m_FluidMaterialDebugViz.SetFloat("_sim_width", m_FluidSim.Width);
+        m_FluidMaterialDebugViz.SetFloat("_sim_height", m_FluidSim.Height);
         m_FluidMaterialDebugViz.SetFloat("_mousex", mouseInSimulationSpace.x);
         m_FluidMaterialDebugViz.SetFloat("_mousey", mouseInSimulationSpace.y);
         m_FluidMaterialDebugViz.SetInt("_mousepressed", m_MousePressed ? 1 :0);
@@ -195,7 +200,8 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_max_velocity", maxVelocity);
         m_FluidMaterialDebugViz.SetFloat("_min_velocity", minVelocity);
 
-        RenderPointsGPU();
+        if (m_ShowParticles)
+            RenderPointsGPU();
         
         if (m_MousePressed)
             m_FluidSim.Interact(mouseInSimulationSpace, m_MouseRadius / m_ScalingFactor, m_InteractionDirection);
@@ -227,19 +233,32 @@ public class FluidSimViz : MonoBehaviour
 
     void RenderPointsGPU()
     {
+        
         m_PointRenderArgsData[1] = (uint)m_FluidSim.ParticleCount;
         m_PointRenderArgsBuffer.SetData(m_PointRenderArgsData);
-        
+
+        var fourCorners = new Vector3[4];
+        m_RectTransform.GetWorldCorners(fourCorners);
+            
+        m_PointInstancedMaterial.SetVector("world_origin", fourCorners[0]);
+        m_PointInstancedMaterial.SetFloat("display_area_width", m_RectTransform.rect.width);
+        m_PointInstancedMaterial.SetFloat("display_area_height", m_RectTransform.rect.height);
+
         m_PointInstancedMaterial.SetBuffer("positions", m_PointBuffer); 
         m_PointInstancedMaterial.SetInt("point_count", m_FluidSim.ParticleCount);
-        m_PointInstancedMaterial.SetFloat("width", m_FluidSim.Width);
-        m_PointInstancedMaterial.SetFloat("height", m_FluidSim.Height);
+        m_PointInstancedMaterial.SetFloat("sim_width", m_FluidSim.Width);
+        m_PointInstancedMaterial.SetFloat("sim_height", m_FluidSim.Height);
         m_PointInstancedMaterial.SetFloat("circle_size", m_CircleSize);
         m_PointInstancedMaterial.SetFloat("scaling_factor", m_ScalingFactor);
         
         var bounds = new Bounds(Vector3.zero, 10000*Vector3.one); // use tighter bounds
         Graphics.DrawMeshInstancedIndirect(m_PointMesh, 0, m_PointInstancedMaterial, bounds, m_PointRenderArgsBuffer);
         
+        // CommandBuffer cmd = new CommandBuffer();
+        // cmd.SetRenderTarget(m_PointRenderTexture);
+        // //cmd.ClearRenderTarget(true, true, Color.red);
+        // Graphics.ExecuteCommandBuffer(cmd);
+        // cmd.Release();
     }
     
 
@@ -263,15 +282,18 @@ public class FluidSimViz : MonoBehaviour
             m_MousePressed = false;
         }
         
-        
-        
         if (Event.current.type != EventType.Repaint) return;
-        
-        //DrawMaterial(new Rect(0,0, m_FluidSim.Width * m_ScalingFactor, m_FluidSim.Height * m_ScalingFactor), m_FluidMaterialDebugViz);
+
+        // if (m_FieldVisualizationMode != FieldVisualizationMode.NoBackground)
+        // {
+        //     var fourCorners = new Vector3[4];
+        //     m_RectTransform.GetWorldCorners(fourCorners);
+        //     var screenSpace = Camera.main.WorldToScreenPoint(fourCorners[0]);
+        //     DrawMaterial(new Rect(screenSpace.x, screenSpace.y, m_FluidSim.Width * m_ScalingFactor, m_FluidSim.Height * m_ScalingFactor), m_FluidMaterialDebugViz);
+        // }
         energyContent.text = $"Kinetic Energy: {m_KineticEnergy}";
         GUI.skin.label.Draw(new Rect(800,0,1000,20), energyContent, 0 );
         
-
         if (!m_ShowGrid) return;
         var thickness = 1;
         // var topleft = new Vector2(0, 0);

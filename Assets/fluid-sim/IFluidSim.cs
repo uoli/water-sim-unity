@@ -12,8 +12,8 @@ public interface IFluidSim
 {
     int ParticleCount { get; }
     float Mass { get; }
-    float Height { get; }
-    float Width { get; }
+    int Height { get; }
+    int Width { get; }
     float SmoothingRadius { get; }
     float TargetDensity { get; }
     GridSpatialLookup LookupHelper { get; }

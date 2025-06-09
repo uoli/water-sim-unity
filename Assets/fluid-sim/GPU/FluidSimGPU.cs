@@ -18,8 +18,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public ComputeShader SimComputeShader;
     public ComputeShader SortComputeShader;
     public int ParticleCount = 100;
-    public float Width = 100;
-    public float Height = 100;
+    public int Width = 100;
+    public int Height = 100;
     public float Mass = 1;
     public float SmoothingRadius = 1.4f;
     public float TargetDensity = 0.01f;
@@ -49,8 +49,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
 
     int IFluidSim.ParticleCount => ParticleCount;
     float IFluidSim.Mass => Mass;
-    float IFluidSim.Height => Height;
-    float IFluidSim.Width => Width;
+    int IFluidSim.Height => Height;
+    int IFluidSim.Width => Width;
     float IFluidSim.SmoothingRadius => SmoothingRadius;
     float IFluidSim.TargetDensity => TargetDensity;
     public GridSpatialLookup LookupHelper => throw new NotImplementedException();

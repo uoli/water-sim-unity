@@ -55,8 +55,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public ReadOnlySpan<Vector2> GetVelocities() { return m_Velocity.AsReadOnlySpan(); }
     public int ParticleCount => m_ParticleCount;
     float IFluidSim.Mass => Mass;
-    public float Height => height;
-    public float Width => width;
+    public int Height => height;
+    public int Width => width;
     public float SmoothingRadius => SmoothingLength;
     float IFluidSim.TargetDensity => m_TargetDensity;
 

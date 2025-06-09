@@ -30,8 +30,8 @@ Shader "Unlit/FluidSimDebugViz"
     StructuredBuffer<float2> _particle_velocities;
     int _PointCount;
     float _scaling_factor;
-    float _sizex;
-    float _sizey;
+    float _sim_width;
+    float _sim_height;
     float _mousex;
     float _mousey;
     int _mousepressed;
@@ -174,10 +174,10 @@ Shader "Unlit/FluidSimDebugViz"
     {
         //float2 size = float2(_sizex, _sizey);
         float2 mouse = float2(_mousex, _mousey);
-        float2 normalizedScreenCoord = (i.scrPos.xy / i.scrPos.w); // [0-1] in viewport
-        float2 screenPixel = normalizedScreenCoord *  _ScreenParams.xy ;
-        float2 localPos = float2(screenPixel.x,  screenPixel.y - _ScreenParams.y + _sizey * _scaling_factor ) / _scaling_factor;
-        //fixed4 col = float4(1, frac(localPos / _ScreenParams.xy) , 1);
+
+        float2 normLocal = i.uv;
+        float2 localPos = normLocal * float2(_sim_width,_sim_height);
+        
         _min_pressure = min(_min_pressure, -1);
 
         fixed4 col;
