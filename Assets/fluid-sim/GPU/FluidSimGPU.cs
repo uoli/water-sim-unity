@@ -24,6 +24,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float SmoothingRadius = 1.4f;
     public float TargetDensity = 0.01f;
     public float PressureMultiplier = 50;
+    public int SubSteps = 1;
     public float DeltaTime = 0.001f;
     public float BoundaryPushStrength = 0;
     public float CollisionDamping = 0.5f;
@@ -172,78 +173,81 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("ForceCenterX", m_ExternalForceCenter.x);
         SimComputeShader.SetFloat("ForceCenterY", m_ExternalForceCenter.y);
         SimComputeShader.SetFloat("ForceStrength", externalForceStrength); 
-        SimComputeShader.SetFloat("Gravity", Gravity); 
-        
-        //Predicted Positions
-        var kernelIndex0 = SimComputeShader.FindKernel("ComputePredictedPositions");
-        SimComputeShader.GetKernelThreadGroupSizes(kernelIndex0, out var xGroupSize,out var yGroupSize,out var zGroupSize);
-        SimComputeShader.SetBuffer(kernelIndex0, "Positions", m_PointBuffer);
-        SimComputeShader.SetBuffer(kernelIndex0, "PredictedPositions", m_PredictedPositionBuffer);
-        SimComputeShader.SetBuffer(kernelIndex0, "Velocity", m_PointVelocityBuffer);
-        SimComputeShader.SetBuffer(kernelIndex0, "DebugBuff", m_DebugBuffer);
-        var threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
-        SimComputeShader.Dispatch(kernelIndex0, threadGroupsX,1,1);
-        
-        //Calculate Spatial Acceleration tables
-        var kernelSpatial0 = SimComputeShader.FindKernel("UpdateSpatialLookup_HashEntries");
-        SimComputeShader.GetKernelThreadGroupSizes(kernelSpatial0, out xGroupSize,out yGroupSize,out zGroupSize);
-        SimComputeShader.SetBuffer(kernelSpatial0, "PredictedPositions", m_PredictedPositionBuffer);
-        SimComputeShader.SetBuffer(kernelSpatial0, "SpatialEntry", m_SpatialEntryBuffer);
-        SimComputeShader.SetBuffer(kernelSpatial0, "StartIndices", m_StartIndicesBuffer);
-        threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
-        SimComputeShader.Dispatch(kernelSpatial0, threadGroupsX,1,1);
-        
-        //Sort Spatial Acceleration Tables
-        //TODO: This is the bottleneck right now
-        //It needs to copy things into and out of the GPU
-        //Also it dispatches like 50 jobs
-        ComputeSort(ref m_SpatialEntryBuffer);
-        
-        //Calculate Spatial Acceleration start index
-        var kernelSpatial2 = SimComputeShader.FindKernel("UpdateSpatialLookup_UpdateStartIndices");
-        SimComputeShader.GetKernelThreadGroupSizes(kernelSpatial2, out xGroupSize,out yGroupSize,out zGroupSize);
-        SimComputeShader.SetBuffer(kernelSpatial2, "SpatialEntry", m_SpatialEntryBuffer);
-        SimComputeShader.SetBuffer(kernelSpatial2, "StartIndices", m_StartIndicesBuffer);
-        SimComputeShader.SetBuffer(kernelSpatial2, "DebugBuff", m_DebugBuffer);
-        threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
-        SimComputeShader.Dispatch(kernelSpatial2, threadGroupsX,1,1);
-        
-        //Calculate Pressure and Density 
-        var kernelIndex1 = SimComputeShader.FindKernel("ComputeDensityAndPressure");
-        SimComputeShader.GetKernelThreadGroupSizes(kernelIndex1, out xGroupSize,out yGroupSize,out zGroupSize);
-        SimComputeShader.SetBuffer(kernelIndex1, "SpatialEntry", m_SpatialEntryBuffer);
-        SimComputeShader.SetBuffer(kernelIndex1, "StartIndices", m_StartIndicesBuffer);
-        SimComputeShader.SetBuffer(kernelIndex1, "PredictedPositions", m_PredictedPositionBuffer);
-        SimComputeShader.SetBuffer(kernelIndex1, "Densities", m_PointDensitiesBuffer);
-        SimComputeShader.SetBuffer(kernelIndex1, "Pressure", m_PointPressureBuffer);
-        SimComputeShader.SetBuffer(kernelIndex1, "Velocity", m_PointVelocityBuffer);
-        SimComputeShader.SetBuffer(kernelIndex1, "DebugBuff", m_DebugBuffer);
-        threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
-        SimComputeShader.Dispatch(kernelIndex1, threadGroupsX,1,1);
-        
-        //Calculate Pressure Force
-        var kernelIndex2 = SimComputeShader.FindKernel("ComputePressureForce");
-        SimComputeShader.GetKernelThreadGroupSizes(kernelIndex2, out xGroupSize,out yGroupSize,out zGroupSize);
-        SimComputeShader.SetBuffer(kernelIndex2, "SpatialEntry", m_SpatialEntryBuffer);
-        SimComputeShader.SetBuffer(kernelIndex2, "StartIndices", m_StartIndicesBuffer);
-        SimComputeShader.SetBuffer(kernelIndex2, "PredictedPositions", m_PredictedPositionBuffer);
-        SimComputeShader.SetBuffer(kernelIndex2, "Densities", m_PointDensitiesBuffer);
-        SimComputeShader.SetBuffer(kernelIndex2, "Pressure", m_PointPressureBuffer);
-        SimComputeShader.SetBuffer(kernelIndex2, "Velocity", m_PointVelocityBuffer);
-        SimComputeShader.SetBuffer(kernelIndex2, "DebugBuff", m_DebugBuffer);
-        threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
-        SimComputeShader.Dispatch(kernelIndex2, threadGroupsX,1,1);
+        SimComputeShader.SetFloat("Gravity", Gravity);
 
-        var kernelIndex3 = SimComputeShader.FindKernel("ComputePositionFromVelocityAndHandleCollision");
-        SimComputeShader.GetKernelThreadGroupSizes(kernelIndex3, out xGroupSize,out yGroupSize,out zGroupSize);
-        SimComputeShader.SetBuffer(kernelIndex3, "Positions", m_PointBuffer);
-        SimComputeShader.SetBuffer(kernelIndex3, "Densities", m_PointDensitiesBuffer);
-        SimComputeShader.SetBuffer(kernelIndex3, "Pressure", m_PointPressureBuffer);
-        SimComputeShader.SetBuffer(kernelIndex3, "Velocity", m_PointVelocityBuffer);
-        SimComputeShader.SetBuffer(kernelIndex3, "DebugBuff", m_DebugBuffer);
-        threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
-        SimComputeShader.Dispatch(kernelIndex3, threadGroupsX,1,1);
-        
+        for (uint i = 0; i < SubSteps; ++i)
+        {
+
+            //Predicted Positions
+            var kernelIndex0 = SimComputeShader.FindKernel("ComputePredictedPositions");
+            SimComputeShader.GetKernelThreadGroupSizes(kernelIndex0, out var xGroupSize, out var yGroupSize, out var zGroupSize);
+            SimComputeShader.SetBuffer(kernelIndex0, "Positions", m_PointBuffer);
+            SimComputeShader.SetBuffer(kernelIndex0, "PredictedPositions", m_PredictedPositionBuffer);
+            SimComputeShader.SetBuffer(kernelIndex0, "Velocity", m_PointVelocityBuffer);
+            SimComputeShader.SetBuffer(kernelIndex0, "DebugBuff", m_DebugBuffer);
+            var threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+            SimComputeShader.Dispatch(kernelIndex0, threadGroupsX, 1, 1);
+
+            //Calculate Spatial Acceleration tables
+            var kernelSpatial0 = SimComputeShader.FindKernel("UpdateSpatialLookup_HashEntries");
+            SimComputeShader.GetKernelThreadGroupSizes(kernelSpatial0, out xGroupSize, out yGroupSize, out zGroupSize);
+            SimComputeShader.SetBuffer(kernelSpatial0, "PredictedPositions", m_PredictedPositionBuffer);
+            SimComputeShader.SetBuffer(kernelSpatial0, "SpatialEntry", m_SpatialEntryBuffer);
+            SimComputeShader.SetBuffer(kernelSpatial0, "StartIndices", m_StartIndicesBuffer);
+            threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+            SimComputeShader.Dispatch(kernelSpatial0, threadGroupsX, 1, 1);
+
+            //Sort Spatial Acceleration Tables
+            //TODO: This is the bottleneck right now
+            //It needs to copy things into and out of the GPU
+            //Also it dispatches like 50 jobs
+            ComputeSort(ref m_SpatialEntryBuffer);
+
+            //Calculate Spatial Acceleration start index
+            var kernelSpatial2 = SimComputeShader.FindKernel("UpdateSpatialLookup_UpdateStartIndices");
+            SimComputeShader.GetKernelThreadGroupSizes(kernelSpatial2, out xGroupSize, out yGroupSize, out zGroupSize);
+            SimComputeShader.SetBuffer(kernelSpatial2, "SpatialEntry", m_SpatialEntryBuffer);
+            SimComputeShader.SetBuffer(kernelSpatial2, "StartIndices", m_StartIndicesBuffer);
+            SimComputeShader.SetBuffer(kernelSpatial2, "DebugBuff", m_DebugBuffer);
+            threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+            SimComputeShader.Dispatch(kernelSpatial2, threadGroupsX, 1, 1);
+
+            //Calculate Pressure and Density 
+            var kernelIndex1 = SimComputeShader.FindKernel("ComputeDensityAndPressure");
+            SimComputeShader.GetKernelThreadGroupSizes(kernelIndex1, out xGroupSize, out yGroupSize, out zGroupSize);
+            SimComputeShader.SetBuffer(kernelIndex1, "SpatialEntry", m_SpatialEntryBuffer);
+            SimComputeShader.SetBuffer(kernelIndex1, "StartIndices", m_StartIndicesBuffer);
+            SimComputeShader.SetBuffer(kernelIndex1, "PredictedPositions", m_PredictedPositionBuffer);
+            SimComputeShader.SetBuffer(kernelIndex1, "Densities", m_PointDensitiesBuffer);
+            SimComputeShader.SetBuffer(kernelIndex1, "Pressure", m_PointPressureBuffer);
+            SimComputeShader.SetBuffer(kernelIndex1, "Velocity", m_PointVelocityBuffer);
+            SimComputeShader.SetBuffer(kernelIndex1, "DebugBuff", m_DebugBuffer);
+            threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+            SimComputeShader.Dispatch(kernelIndex1, threadGroupsX, 1, 1);
+
+            //Calculate Pressure Force
+            var kernelIndex2 = SimComputeShader.FindKernel("ComputePressureForce");
+            SimComputeShader.GetKernelThreadGroupSizes(kernelIndex2, out xGroupSize, out yGroupSize, out zGroupSize);
+            SimComputeShader.SetBuffer(kernelIndex2, "SpatialEntry", m_SpatialEntryBuffer);
+            SimComputeShader.SetBuffer(kernelIndex2, "StartIndices", m_StartIndicesBuffer);
+            SimComputeShader.SetBuffer(kernelIndex2, "PredictedPositions", m_PredictedPositionBuffer);
+            SimComputeShader.SetBuffer(kernelIndex2, "Densities", m_PointDensitiesBuffer);
+            SimComputeShader.SetBuffer(kernelIndex2, "Pressure", m_PointPressureBuffer);
+            SimComputeShader.SetBuffer(kernelIndex2, "Velocity", m_PointVelocityBuffer);
+            SimComputeShader.SetBuffer(kernelIndex2, "DebugBuff", m_DebugBuffer);
+            threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+            SimComputeShader.Dispatch(kernelIndex2, threadGroupsX, 1, 1);
+
+            var kernelIndex3 = SimComputeShader.FindKernel("ComputePositionFromVelocityAndHandleCollision");
+            SimComputeShader.GetKernelThreadGroupSizes(kernelIndex3, out xGroupSize, out yGroupSize, out zGroupSize);
+            SimComputeShader.SetBuffer(kernelIndex3, "Positions", m_PointBuffer);
+            SimComputeShader.SetBuffer(kernelIndex3, "Densities", m_PointDensitiesBuffer);
+            SimComputeShader.SetBuffer(kernelIndex3, "Pressure", m_PointPressureBuffer);
+            SimComputeShader.SetBuffer(kernelIndex3, "Velocity", m_PointVelocityBuffer);
+            SimComputeShader.SetBuffer(kernelIndex3, "DebugBuff", m_DebugBuffer);
+            threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+            SimComputeShader.Dispatch(kernelIndex3, threadGroupsX, 1, 1);
+        }
         /*
         m_PointBuffer.GetData(m_PointPositionData);
         m_PointDensitiesBuffer.GetData(m_PointDensitiesData);
@@ -257,14 +261,14 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_ExternalForceRadius = 0; //clear External Force interaction
 
         
-        for (var i = 0; i < ParticleCount; i++)
-        {
-            if (m_DebugData[i] != 0)
-            {
-                EditorApplication.isPaused = true;
-                Debug.Log($"Item {i} has DebugData {m_DebugData[i]}");
-            }
-        }
+        // for (var i = 0; i < ParticleCount; i++)
+        // {
+        //     if (m_DebugData[i] != 0)
+        //     {
+        //         EditorApplication.isPaused = true;
+        //         Debug.Log($"Item {i} has DebugData {m_DebugData[i]}");
+        //     }
+        // }
     }
     
     void ComputeSort(ref ComputeBuffer targetBuffer)
