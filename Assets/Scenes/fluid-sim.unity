@@ -369,6 +369,8 @@ MonoBehaviour:
   DeltaTime: 0.03
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
+  ExternalForceStrength: 100
+  Gravity: 9.8
 --- !u!224 &367632488
 RectTransform:
   m_ObjectHideFlags: 0
@@ -408,7 +410,6 @@ MonoBehaviour:
   m_CircleSize: 1
   m_ShowVelocities: 0
   m_ShowGrid: 0
-  m_ShowParticleOverlay: 0
   m_ShowParticles: 1
   m_VelocityScale: 1
   m_DensityVizFactor: 1
@@ -417,7 +418,7 @@ MonoBehaviour:
   m_NegativePressureColor: {r: 0, g: 0, b: 0, a: 0}
   m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
   m_PositivePressureColor: {r: 1, g: 0, b: 0, a: 0}
-  m_MouseRadius: 1
+  m_MouseRadius: 30
 --- !u!1 &604712593
 GameObject:
   m_ObjectHideFlags: 0
@@ -889,7 +890,6 @@ MonoBehaviour:
   m_CircleSize: 1
   m_ShowVelocities: 0
   m_ShowGrid: 0
-  m_ShowParticleOverlay: 0
   m_ShowParticles: 0
   m_VelocityScale: 1
   m_DensityVizFactor: 57.4

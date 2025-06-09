@@ -65,7 +65,8 @@ public class FluidSimViz : MonoBehaviour
 
     float m_KineticEnergy = 0;
     GUIContent energyContent = new GUIContent();
-    Vector3[] m_FourCorners = new Vector3[4];
+    Vector3[] m_FourCornersWorldSpace = new Vector3[4];
+    Vector3[] m_FourCornersScreenSpace = new Vector3[4];
     
     Vector2 m_MousePos = Vector2.zero;
     bool m_MousePressed = false;
@@ -109,6 +110,12 @@ public class FluidSimViz : MonoBehaviour
     void Update()
     {
         using var markerScope = s_UpdatePerfMarker.Auto();
+        m_RectTransform.GetWorldCorners(m_FourCornersWorldSpace);
+        var cam = Camera.main;
+        m_FourCornersScreenSpace[0] = cam.WorldToScreenPoint(m_FourCornersWorldSpace[0]);
+        m_FourCornersScreenSpace[1] = cam.WorldToScreenPoint(m_FourCornersWorldSpace[1]);
+        m_FourCornersScreenSpace[2] = cam.WorldToScreenPoint(m_FourCornersWorldSpace[2]);
+        m_FourCornersScreenSpace[3] = cam.WorldToScreenPoint(m_FourCornersWorldSpace[3]);
 
         if (m_PointBuffer == null || m_PointDensitiesBuffer.count != m_FluidSim.ParticleCount)
         {
@@ -168,6 +175,8 @@ public class FluidSimViz : MonoBehaviour
         maxVelocity = Mathf.Sqrt(maxVelocity);
         
         var mouseInSimulationSpace = CalcMouseInSimulationSpace();
+        var mouseRadiusRatio  =  m_FluidSim.Width / (m_FourCornersScreenSpace[2].x - m_FourCornersScreenSpace[0].x);
+        var adjustedRadius = m_MouseRadius * mouseRadiusRatio;
 
         m_PointBuffer.SetData(m_PointPositionData);
         m_PointDensitiesBuffer.SetData(m_PointDensitiesData);
@@ -184,7 +193,7 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_mousex", mouseInSimulationSpace.x);
         m_FluidMaterialDebugViz.SetFloat("_mousey", mouseInSimulationSpace.y);
         m_FluidMaterialDebugViz.SetInt("_mousepressed", m_MousePressed ? 1 :0);
-        m_FluidMaterialDebugViz.SetFloat("_mouseradius", m_MouseRadius);
+        m_FluidMaterialDebugViz.SetFloat("_mouseradius", adjustedRadius);
         m_FluidMaterialDebugViz.SetFloat("_smoothingLength", m_FluidSim.SmoothingRadius);
         m_FluidMaterialDebugViz.SetFloat("_DensityVizFactor", m_DensityVizFactor);
         m_FluidMaterialDebugViz.SetFloat("_circleSize", m_ShowParticles == ParticleVisualizationMode.FieldFragment ? m_CircleSize: 0);
@@ -202,16 +211,19 @@ public class FluidSimViz : MonoBehaviour
 
         if (m_ShowParticles == ParticleVisualizationMode.DrawInstanced)
             RenderPointsGPU(maxVelocity);
-        
+
         if (m_MousePressed)
-            m_FluidSim.Interact(mouseInSimulationSpace, m_MouseRadius / m_ScalingFactor, m_InteractionDirection);
+        {
+            
+            m_FluidSim.Interact(mouseInSimulationSpace, adjustedRadius, m_InteractionDirection);
+        }
     }
     
     Vector2 CalcMouseInSimulationSpace()
     {
-        m_RectTransform.GetWorldCorners(m_FourCorners);
-        var topLeftCameraSpace = Camera.main.WorldToScreenPoint(m_FourCorners[0]);
-        var bottomRightCameraSpace = Camera.main.WorldToScreenPoint(m_FourCorners[2]);
+
+        var topLeftCameraSpace = m_FourCornersScreenSpace[0];
+        var bottomRightCameraSpace = m_FourCornersScreenSpace[2];
         var tx = Mathf.InverseLerp(topLeftCameraSpace.x, bottomRightCameraSpace.x, m_MousePos.x);
         //The top and bottom are flipped here, because screen space is flipped in relation to simulation space
         var mousey = Camera.main.pixelHeight - m_MousePos.y;
@@ -250,8 +262,6 @@ public class FluidSimViz : MonoBehaviour
         m_PointRenderArgsData[1] = (uint)m_FluidSim.ParticleCount;
         m_PointRenderArgsBuffer.SetData(m_PointRenderArgsData);
         
-        m_RectTransform.GetWorldCorners(m_FourCorners);
-        
         m_PointInstancedMaterial.SetBuffer("positions", m_PointBuffer); 
         m_PointInstancedMaterial.SetBuffer("_particle_densities", m_PointDensitiesBuffer);
         m_PointInstancedMaterial.SetBuffer("_particle_pressures", m_PointPressureBuffer);
@@ -259,7 +269,7 @@ public class FluidSimViz : MonoBehaviour
         m_PointInstancedMaterial.SetFloat("_max_velocity", maxVelocity);
         m_PointInstancedMaterial.SetInt("_particleVisMode", (int)m_ParticleVisualizationMode);
             
-        m_PointInstancedMaterial.SetVector("world_origin", m_FourCorners[0]);
+        m_PointInstancedMaterial.SetVector("world_origin", m_FourCornersWorldSpace[0]);
         m_PointInstancedMaterial.SetFloat("display_area_width", m_RectTransform.rect.width);
         m_PointInstancedMaterial.SetFloat("display_area_height", m_RectTransform.rect.height);
 
