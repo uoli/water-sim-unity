@@ -4,6 +4,7 @@ using Unity.Collections;
 using Unity.Profiling;
 using UnityEditor;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 public enum FieldVisualizationMode
 {
@@ -25,6 +26,8 @@ public class FluidSimViz : MonoBehaviour
     public float m_ScalingFactor = 1.0f;
     public Texture2D m_CircleTexture;
     public Material m_FluidMaterialDebugViz;
+    public Material m_PointInstancedMaterial;
+
     public float m_CircleSize = 10;
     public bool m_ShowVelocities = false;
     public bool m_ShowGrid = false;
@@ -37,6 +40,10 @@ public class FluidSimViz : MonoBehaviour
     public Color m_NeutralPressureColor;
     public Color m_PositivePressureColor;
     public float m_MouseRadius = 1.0f;
+    
+    Mesh m_PointMesh;
+    ComputeBuffer m_PointRenderArgsBuffer;
+    uint[] m_PointRenderArgsData;
     
     IFluidSim m_FluidSim;
     
@@ -61,12 +68,19 @@ public class FluidSimViz : MonoBehaviour
     
     void Start()
     {
+        
+    }
+
+    void OnEnable()
+    {
         m_FluidSim = GetComponent<IFluidSim>() as IFluidSim;
+        InitializePointInstancedRender();
     }
 
     void OnDisable()
     {
-        CleanupComputeBuffers();  
+        CleanupComputeBuffers();
+        CleanupPointInstancedRender();
     }
 
     void OnDestroy() {}
@@ -180,9 +194,52 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_max_density", maxDensity);
         m_FluidMaterialDebugViz.SetFloat("_max_velocity", maxVelocity);
         m_FluidMaterialDebugViz.SetFloat("_min_velocity", minVelocity);
+
+        RenderPointsGPU();
         
         if (m_MousePressed)
             m_FluidSim.Interact(mouseInSimulationSpace, m_MouseRadius / m_ScalingFactor, m_InteractionDirection);
+    }
+
+    void InitializePointInstancedRender()
+    {
+        m_PointInstancedMaterial.enableInstancing = true;
+        m_PointMesh = new Mesh();
+        m_PointMesh.SetVertices(new Vector3[]{ new(-0.5f,0.5f,0), new(0.5f,0.5f,0), new(0.5f,-0.5f,0), new(-0.5f,-0.5f,0)});
+        m_PointMesh.SetIndices(new []{ 0,1,2, 2,3,0}, MeshTopology.Triangles, 0);
+        m_PointMesh.Optimize();
+        m_PointRenderArgsData = new uint[]
+        {
+            m_PointMesh.GetIndexCount(0),
+            (uint)m_FluidSim.ParticleCount,
+            m_PointMesh.GetIndexStart(0),
+            m_PointMesh.GetBaseVertex(0),
+            0
+        };
+        m_PointRenderArgsBuffer = new ComputeBuffer(1, m_PointRenderArgsData.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
+    }
+
+    void CleanupPointInstancedRender()
+    {
+        m_PointRenderArgsBuffer.Dispose();
+        Destroy(m_PointMesh);
+    }
+
+    void RenderPointsGPU()
+    {
+        m_PointRenderArgsData[1] = (uint)m_FluidSim.ParticleCount;
+        m_PointRenderArgsBuffer.SetData(m_PointRenderArgsData);
+        
+        m_PointInstancedMaterial.SetBuffer("positions", m_PointBuffer); 
+        m_PointInstancedMaterial.SetInt("point_count", m_FluidSim.ParticleCount);
+        m_PointInstancedMaterial.SetFloat("width", m_FluidSim.Width);
+        m_PointInstancedMaterial.SetFloat("height", m_FluidSim.Height);
+        m_PointInstancedMaterial.SetFloat("circle_size", m_CircleSize);
+        m_PointInstancedMaterial.SetFloat("scaling_factor", m_ScalingFactor);
+        
+        var bounds = new Bounds(Vector3.zero, 10000*Vector3.one); // use tighter bounds
+        Graphics.DrawMeshInstancedIndirect(m_PointMesh, 0, m_PointInstancedMaterial, bounds, m_PointRenderArgsBuffer);
+        
     }
     
 
@@ -210,7 +267,7 @@ public class FluidSimViz : MonoBehaviour
         
         if (Event.current.type != EventType.Repaint) return;
         
-        DrawMaterial(new Rect(0,0, m_FluidSim.Width * m_ScalingFactor, m_FluidSim.Height * m_ScalingFactor), m_FluidMaterialDebugViz);
+        //DrawMaterial(new Rect(0,0, m_FluidSim.Width * m_ScalingFactor, m_FluidSim.Height * m_ScalingFactor), m_FluidMaterialDebugViz);
         energyContent.text = $"Kinetic Energy: {m_KineticEnergy}";
         GUI.skin.label.Draw(new Rect(800,0,1000,20), energyContent, 0 );
         
