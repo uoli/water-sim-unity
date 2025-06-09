@@ -359,13 +359,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   SimComputeShader: {fileID: 7200000, guid: 47a5eccea77b2bf4ca77adc4d12d562f, type: 3}
   SortComputeShader: {fileID: 7200000, guid: cae7e393630646ab95afb5834be1888b, type: 3}
-  ParticleCount: 100
+  ParticleCount: 1000
   Width: 100
   Height: 100
   Mass: 1
-  SmoothingRadius: 21.95
+  SmoothingRadius: 3.83
   TargetDensity: 0.01
-  PressureMultiplier: 0.1
+  PressureMultiplier: 100
   DeltaTime: 0.03
   BoundaryPushStrength: 0
   CollisionDamping: 0.5

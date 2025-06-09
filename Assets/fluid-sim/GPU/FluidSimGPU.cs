@@ -175,6 +175,9 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.Dispatch(kernelSpatial0, threadGroupsX,1,1);
         
         //Sort Spatial Acceleration Tables
+        //TODO: This is the bottleneck right now
+        //It needs to copy things into and out of the GPU
+        //Also it dispatches like 50 jobs
         ComputeSort(ref m_SpatialEntryBuffer);
         
         //Calculate Spatial Acceleration start index
