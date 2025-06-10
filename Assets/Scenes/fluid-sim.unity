@@ -322,7 +322,7 @@ MonoBehaviour:
   m_FluidMaterialDebugShader: {fileID: 4800000, guid: bea36adff31bbfd4fb4c9ee3ec899281, type: 3}
   m_PointInstancedShader: {fileID: 4800000, guid: fcfb3d4be45b3da4da15d3c3c11f6d24, type: 3}
   m_FluidMeshRenderer: {fileID: 1280098595}
-  m_UseDynamicRanges: 0
+  m_UseDynamicRanges: 1
   m_CircleSize: 0.5
   m_ShowVelocities: 0
   m_ShowGrid: 0
@@ -330,7 +330,7 @@ MonoBehaviour:
   m_VelocityScale: 1
   m_DensityVizFactor: 1
   m_FieldVisualizationMode: 3
-  m_ParticleVisualizationMode: 0
+  m_ParticleVisualizationMode: 2
   m_NegativePressureColor: {r: 0, g: 0, b: 0, a: 0}
   m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
   m_PositivePressureColor: {r: 1, g: 0, b: 0, a: 0}
@@ -770,7 +770,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &2014640968
 MonoBehaviour:
   m_ObjectHideFlags: 0

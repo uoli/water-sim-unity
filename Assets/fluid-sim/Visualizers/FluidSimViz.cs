@@ -333,7 +333,7 @@ public class FluidSimViz : MonoBehaviour
         GUI.skin.label.Draw(new Rect(800,0,1000,20), energyContent, 0 );
 
         var showUIParticles = m_ShowParticles == ParticleVisualizationMode.UIOverlay;
-
+#if UNITY_EDITOR
         if (!m_ShowGrid && !m_ShowVelocities && !showUIParticles) return;
         
         var thickness = 1;
@@ -408,8 +408,9 @@ public class FluidSimViz : MonoBehaviour
         }
 
         particleIndexes.Dispose();
+        #endif
     }
-
+#if UNITY_EDITOR
     static void DrawRect(Rect rect, float thickness, Color color)
     {
         var topLeft = new Vector2(rect.x, rect.y);
@@ -454,6 +455,6 @@ public class FluidSimViz : MonoBehaviour
         Handles.DrawLine(position, position+direction, 2.0f);
         Handles.color = prevColor;
     }
-
+#endif
  
 }
