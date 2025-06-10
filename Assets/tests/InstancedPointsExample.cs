@@ -43,6 +43,7 @@ public class InstancedPointsExample : MonoBehaviour
         positions = new Vector4[instanceCount];
         colors = new Vector4[instanceCount];
         positionBuffer = new ComputeBuffer(instanceCount,  Marshal.SizeOf(typeof(Vector4)));
+        positionBuffer.name = "DrawingPositionBuffer";
 
         // Fill with data
         for (int i = 0; i < instanceCount; i++)
