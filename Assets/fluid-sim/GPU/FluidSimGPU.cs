@@ -100,10 +100,15 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             m_DebugData[i] = 0;
         }
         m_PointBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
+        m_PointBuffer.name = "PositionsBuffer";
         m_PredictedPositionBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
+        m_PredictedPositionBuffer.name = "PredictedPositionsBuffer";
         m_PointDensitiesBuffer = new ComputeBuffer(ParticleCount, sizeof(float));
+        m_PointDensitiesBuffer.name = "DensitiesBuffer";
         m_PointPressureBuffer = new ComputeBuffer(ParticleCount, sizeof(float));
+        m_PointDensitiesBuffer.name = "PressureBuffer";
         m_PointVelocityBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
+        m_PointVelocityBuffer.name = "VelocityBuffer";
         m_PointBuffer.SetData(m_PointPositionData);
         m_PointDensitiesBuffer.SetData(m_PointDensitiesData);
         m_PointPressureBuffer.SetData(m_PointDensitiesData);
@@ -112,11 +117,14 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         
         var size = Marshal.SizeOf(typeof(SpatialEntry));
         m_SpatialEntryBuffer = new ComputeBuffer(ParticleCount, size);
+        m_PointDensitiesBuffer.name = "SpatialEntriesBuffer";
         m_StartIndicesBuffer = new ComputeBuffer(ParticleCount, sizeof(int));
+        m_SpatialEntryBuffer.name = "SpatialStartIndicesBuffer";
         m_SpatialEntryBuffer.SetData(m_SpatialEntry);
         m_StartIndicesBuffer.SetData(m_StartIndices);
         
         m_DebugBuffer = new ComputeBuffer(m_DebugData.Length, sizeof(float));
+        m_DebugBuffer.name = "DebugBuffer";
         m_DebugBuffer.SetData(m_DebugData);
     }
     void CleanupComputeBuffers()
@@ -277,7 +285,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         
         //used for ping pong
         var bufferA = new ComputeBuffer(paddedCount, stride);
+        bufferA.name = "SortPingPongABuffer";
         var bufferB = new ComputeBuffer(paddedCount, stride);
+        bufferB.name = "SortPingPongBBuffer";
+
         
         // Copy input to bufferA
         var temp = new SpatialEntry[paddedCount];
@@ -317,6 +328,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         // Copy the first N elements back to the target buffer.
         targetBuffer.Dispose();
         targetBuffer = new ComputeBuffer(originalCount, stride);
+        targetBuffer.name = "SortResultBuffer";
         var sortedData = new SpatialEntry[originalCount];
         input.GetData(sortedData, 0, 0, originalCount);
         targetBuffer.SetData(sortedData);

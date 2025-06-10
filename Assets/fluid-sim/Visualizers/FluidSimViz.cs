@@ -258,6 +258,7 @@ public class FluidSimViz : MonoBehaviour
             0
         };
         m_PointRenderArgsBuffer = new ComputeBuffer(1, m_PointRenderArgsData.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
+        m_PointRenderArgsBuffer.name = "m_PointRenderArgsBuffer";
     }
 
     void CleanupPointInstancedRender()
