@@ -129,7 +129,7 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
         {
             int2 cell = centralCell + int2(dx, dy);
             uint cellKey = CellPositionToKey(cell);
-            uint spatialIndex = StartIndices[cellKey];
+            int spatialIndex = StartIndices[cellKey];
             if (spatialIndex == -1) continue;
             do
             {
@@ -145,7 +145,7 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
                 float influence = SmoothingKernel2(sqrt(sqrDst), SmoothingRadius, precalculatedKernelFactor);
                 density += Mass * influence;
                 
-            } while (spatialIndex < (uint)ParticleCount && SpatialEntry[spatialIndex].cellKey == cellKey);
+            } while (spatialIndex < ParticleCount && SpatialEntry[spatialIndex].cellKey == cellKey);
         }
     }
     return density;
