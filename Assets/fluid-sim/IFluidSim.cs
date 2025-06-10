@@ -1,6 +1,5 @@
-﻿
-using System;
-using Unity.Collections;
+﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public enum InteractionDirection
@@ -8,6 +7,19 @@ public enum InteractionDirection
     Attract,
     Repel
 }
+
+public struct InputSimulationSurfacePoints
+{
+    public Vector2 SimSpacePoint;
+    public Vector2 normal;
+    public Vector2 velocity;
+    public float areaWeight;
+}
+public struct OutputSimulationSurfacePoints
+{
+    public Vector2 force;
+}
+
 
 public interface IFluidSim
 {
@@ -18,8 +30,6 @@ public interface IFluidSim
     float SmoothingRadius { get; }
     float TargetDensity { get; }
     
-    bool HasDataInCompute { get; }
-    
     GridSpatialLookup LookupHelper { get; }
     ComputeBuffer GetPositionComputeBuffer();
     ComputeBuffer GetDensities();
@@ -27,4 +37,11 @@ public interface IFluidSim
     ComputeBuffer GetVelocities();
 
     void Interact(Vector2 mouseInSimulationSpace, float scalingFactor, InteractionDirection interactionDirection);
+    
+    event Action PreSimulation;
+    event Action PostSimulation;
+    void SetRigidBodySurfaceResults(IList<InputSimulationSurfacePoints> points);
+    void RetrieveRigidBodySurfaceResults(IList<OutputSimulationSurfacePoints> points);
+    
+    Transform Transform { get; }
 }

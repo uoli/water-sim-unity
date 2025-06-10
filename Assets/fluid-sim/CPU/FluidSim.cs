@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Profiling;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Random = UnityEngine.Random;
 
 public class FluidSim : MonoBehaviour, IFluidSim
@@ -34,6 +36,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
     NativeArray<float> m_Pressure;
     NativeArray<Vector2> m_Velocity;
     internal GridSpatialLookup m_LookupHelper;
+    
+    NativeArray<InputSimulationSurfacePoints> m_ExternalPoints;
+    NativeArray<OutputSimulationSurfacePoints> m_ExternalPointsResults;
+    
+    
 
     float m_SquaredSmoothingLength;
     float m_KernelTerm;
@@ -51,9 +58,10 @@ public class FluidSim : MonoBehaviour, IFluidSim
     static readonly ProfilerMarker s_StepPerfMarker = new ProfilerMarker("FluidSim.Step");
     static readonly ProfilerMarker s_PressurePerfMarker = new ProfilerMarker("FluidSim.PressureCalc");
     static readonly ProfilerMarker s_DensityPerfMarker = new ProfilerMarker("FluidSim.DensityeCalc");
-
-    public bool HasDataInCompute => false;
-    public GridSpatialLookup LookupHelper => throw new NotImplementedException();
+    
+    public event Action PreSimulation;
+    public event Action PostSimulation;
+    public GridSpatialLookup LookupHelper => m_LookupHelper;
     public ComputeBuffer GetPositionComputeBuffer() { return m_PositionComputeBuffer.Buffer; }
     public ComputeBuffer GetDensities() { return m_DensityComputeBuffer.Buffer; }
     public ComputeBuffer GetPressures() { return m_PressureComputeBuffer.Buffer; }
@@ -64,6 +72,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public int Width => width;
     public float SmoothingRadius => SmoothingLength;
     float IFluidSim.TargetDensity => m_TargetDensity;
+    Transform IFluidSim.Transform => transform;
+
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -159,7 +169,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public void DoUpdate()
     {
         using var markerScope = s_UpdatePerfMarker.Auto();
-        
+        PreSimulation?.Invoke();
+
         CachePrecomputedValues();
         var stepTime = SimulationStep;
         if (UseAdaptativeStepTime)
@@ -190,7 +201,10 @@ public class FluidSim : MonoBehaviour, IFluidSim
         m_PositionComputeBuffer.Update(m_Position);
         m_DensityComputeBuffer .Update(m_Density);
         m_PressureComputeBuffer.Update(m_Pressure);
-        m_VelocitiesComputeBuffer .Update(m_Velocity);
+        m_VelocitiesComputeBuffer.Update(m_Velocity);
+        
+        PostSimulation?.Invoke();
+
     }
 
     public void Interact(Vector2 position, float radius, InteractionDirection direction)
@@ -374,6 +388,42 @@ public class FluidSim : MonoBehaviour, IFluidSim
         }
     }
 
+    //[BurstCompile]
+    struct CalculateForcesToExternalObjects : IJobFor
+    {
+        [ReadOnly]
+        public NativeArray<Vector2> positions;
+        [ReadOnly]
+        public GridSpatialLookup lookupHelper;
+        [ReadOnly]
+        public NativeArray<Vector2> velocities;
+        [ReadOnly]
+        public NativeArray<float> pressures;
+        [ReadOnly]
+        public NativeArray<float> densities;
+        [ReadOnly]
+        public NativeArray<InputSimulationSurfacePoints> rigidBodyPoints;
+        public NativeArray<OutputSimulationSurfacePoints> outputSurfacePoints;
+        public float mass;
+        public float squaredSmoothingLength;
+        public float smoothingLength;
+        public float kernelDerivativeTerm;
+        public float deltaTime;
+
+        public void Execute(int index)
+        {
+            var surfacePoint = rigidBodyPoints[index]; 
+
+            var pressureForce = CalculatePressureForRigidObject(surfacePoint.SimSpacePoint, lookupHelper, mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm,
+                positions, pressures, densities);
+            var force = pressureForce * surfacePoint.normal * surfacePoint.areaWeight * deltaTime; //TODO: not sure about the deltaTime here
+            outputSurfacePoints[index] = new OutputSimulationSurfacePoints
+            {
+                force = force
+            };
+        }
+    }
+
     void SimulateStep(float deltaTime)
     {
         using var markerScope = s_StepPerfMarker.Auto();
@@ -423,6 +473,26 @@ public class FluidSim : MonoBehaviour, IFluidSim
         };
         var viscosityJobHandle = viscosityJob.ScheduleParallelByRef(m_Position.Length,
             64, velocityFromPressureJobHandle);
+
+        var externalObjectForcesJob = new CalculateForcesToExternalObjects
+        {
+            positions = m_PredictedPosition,
+            lookupHelper = m_LookupHelper,
+            velocities = m_Velocity,
+            pressures = m_Pressure,
+            densities = m_Density,
+            rigidBodyPoints = m_ExternalPoints,
+            outputSurfacePoints = m_ExternalPointsResults,
+            mass = Mass,
+            squaredSmoothingLength = m_SquaredSmoothingLength,
+            smoothingLength = SmoothingLength,
+            kernelDerivativeTerm = m_KernelDerivativeTerm,
+            deltaTime = deltaTime,
+
+        };
+        var externalObjectForcesJobHandle = externalObjectForcesJob.ScheduleParallelByRef(m_ExternalPoints.Length,
+            64, viscosityJobHandle); //TODO: this does not depend on the gravity job, but keeping a chain for simplicity for now
+        externalObjectForcesJobHandle.Complete();
         
         var job = new CalculatePositionFromVelocityJobFor()
         {
@@ -436,7 +506,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             collisionDamping = CollisionDamping,
         };
         var velocityJobHandle = job.ScheduleParallelByRef(m_Position.Length,
-            64, viscosityJobHandle);
+            64, externalObjectForcesJobHandle);
         velocityJobHandle.Complete();
 
         //TODO: this is only needed next frame so this can be backgrounded.
@@ -556,17 +626,17 @@ public class FluidSim : MonoBehaviour, IFluidSim
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static Vector2 CalculatePressureGradient(int i, GridSpatialLookup lookup, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
-        ReadOnlySpan<Vector2> position, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density)
+        ReadOnlySpan<Vector2> positions, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density)
     {
-        var particleIndices = new NativeList<int>(position.Length, Allocator.Temp);
-        lookup.GetParticlesAround(position[i], particleIndices);
+        var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
+        lookup.GetParticlesAround(positions[i], particleIndices);
         var pressureGradient = Vector2.zero;
         //for (var j = 0; j < position.Length; j++)
         foreach(var j in particleIndices)
         {
             if (i == j) continue;
             
-            var dif = position[j] - position[i];
+            var dif = positions[j] - positions[i];
             var dir = dif.normalized;
             var sqrDst = Vector2.SqrMagnitude(dif);
             if (sqrDst > squaredSmoothingLength) continue; 
@@ -575,6 +645,28 @@ public class FluidSim : MonoBehaviour, IFluidSim
             var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
             var averagedPressure = (pressure[j] + pressure[i]) / 2;
             pressureGradient += dir * (averagedPressure * mass) / density[j] * influence;
+        }
+        particleIndices.Dispose();
+        return pressureGradient;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static Vector2 CalculatePressureForRigidObject(Vector2 position, GridSpatialLookup lookup, float mass,float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm,
+        ReadOnlySpan<Vector2> positions, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density)
+    {
+        var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
+        lookup.GetParticlesAround(position, particleIndices);
+        var pressureGradient = Vector2.zero;
+        //for (var j = 0; j < position.Length; j++)
+        foreach(var j in particleIndices)
+        {
+            var dif = positions[j] - position;
+            var dir = dif.normalized;
+            var sqrDst = Vector2.SqrMagnitude(dif);
+            if (sqrDst > squaredSmoothingLength) continue; 
+            var distance = Mathf.Sqrt(sqrDst);
+            var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
+            pressureGradient += dir * (pressure[j] * mass) / density[j] * influence;
         }
         particleIndices.Dispose();
         return pressureGradient;
@@ -606,5 +698,28 @@ public class FluidSim : MonoBehaviour, IFluidSim
         return viscosity * viscosityFactor;
     }
     
-
+    //TODO: this only handles a single rigidbody
+    public void SetRigidBodySurfaceResults(IList<InputSimulationSurfacePoints> points)
+    {
+        if (!m_ExternalPoints.IsCreated || m_ExternalPoints.Length < points.Count)
+        {
+            m_ExternalPoints.Dispose();
+            m_ExternalPointsResults.Dispose();
+            m_ExternalPoints = new NativeArray<InputSimulationSurfacePoints>(points.Count, Allocator.Persistent);
+            m_ExternalPointsResults = new NativeArray<OutputSimulationSurfacePoints>(points.Count, Allocator.Persistent);
+        }
+        
+        for (var i = 0; i < points.Count; i++)
+        {
+            var point = points[i];
+            m_ExternalPoints[i] = point;
+        }
+    }
+    public void RetrieveRigidBodySurfaceResults(IList<OutputSimulationSurfacePoints> points)
+    {
+        for (var i = 0; i < m_ExternalPointsResults.Length; i++)
+        {
+            points[i] = m_ExternalPointsResults[i] ;
+        }
+    }
 }

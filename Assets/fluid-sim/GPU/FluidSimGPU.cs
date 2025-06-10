@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -51,20 +52,24 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     float m_ExternalForceRadius;
     InteractionDirection m_InteractionDirection;
     IFluidSim m_FluidSimImplementation;
-
+    
+    
+    public event Action PreSimulation;
+    public event Action PostSimulation;
     int IFluidSim.ParticleCount => ParticleCount;
     float IFluidSim.Mass => Mass;
     int IFluidSim.Height => Height;
     int IFluidSim.Width => Width;
     float IFluidSim.SmoothingRadius => SmoothingRadius;
     float IFluidSim.TargetDensity => TargetDensity;
-    public bool HasDataInCompute => true;
     public GridSpatialLookup LookupHelper => throw new NotImplementedException();
     public ComputeBuffer GetDensities() { return m_PointDensitiesBuffer; }
     public ComputeBuffer GetPressures() { return m_PointPressureBuffer; }
     public ComputeBuffer GetVelocities() { return m_PointVelocityBuffer; }
     
     public ComputeBuffer GetPositionComputeBuffer() { return m_PointBuffer; }
+    Transform IFluidSim.Transform => transform;
+
 
     void OnEnable()
     {
@@ -158,6 +163,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             InitParticleData();
         }
 
+        PreSimulation?.Invoke();
         var externalForceStrength = ExternalForceStrength;
         if (m_InteractionDirection == InteractionDirection.Repel)
         {
@@ -265,6 +271,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_PredictedPositionBuffer.GetData(m_PredictedPositionData);
 */
         m_ExternalForceRadius = 0; //clear External Force interaction
+        PostSimulation?.Invoke();
 
         
         // for (var i = 0; i < ParticleCount; i++)
@@ -343,5 +350,13 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_ExternalForceCenter = mouseInSimulationSpace;
         m_ExternalForceRadius = radius;
         m_InteractionDirection = interactionDirection;
+    }
+    public void SetRigidBodySurfaceResults(IList<InputSimulationSurfacePoints> points)
+    {
+        throw new NotImplementedException();
+    }
+    public void RetrieveRigidBodySurfaceResults(IList<OutputSimulationSurfacePoints> points)
+    {
+        throw new NotImplementedException();
     }
 }
