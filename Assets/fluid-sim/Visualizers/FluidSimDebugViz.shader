@@ -232,7 +232,7 @@ Shader "Unlit/FluidSimDebugViz"
             
                 if (distance(pos, localPos) <_circleSize / _scaling_factor)
                 {
-                    col = GetPointColor(_particleVisMode, _particle_pressures[i],  _particle_velocities[i],  _max_velocity);
+                    col = GetPointColor(_particleVisMode, float4(0,1,1,1), _particle_pressures[i],  _particle_velocities[i],  _max_velocity);
                 }
             }
         }

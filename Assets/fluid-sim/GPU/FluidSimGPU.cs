@@ -359,4 +359,5 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     {
         throw new NotImplementedException();
     }
+    public ComputeBuffer InputExternalPoints => throw new NotImplementedException();
 }

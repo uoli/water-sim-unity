@@ -42,6 +42,7 @@ public interface IFluidSim
     event Action PostSimulation;
     void SetRigidBodySurfaceResults(IList<InputSimulationSurfacePoints> points);
     void RetrieveRigidBodySurfaceResults(IList<OutputSimulationSurfacePoints> points);
+    ComputeBuffer InputExternalPoints { get; }
     
     Transform Transform { get; }
 }

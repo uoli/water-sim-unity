@@ -1,12 +1,10 @@
-﻿fixed4 GetPointColor(int _particleVisMode, float pressure, float2 velocity, float _max_velocity)
+﻿fixed4 GetPointColor(int _particleVisMode, fixed4 color, float pressure, float2 velocity, float _max_velocity)
 {
-    fixed4 color;
     switch (_particleVisMode)
     {
         case 0:
             default:
         {
-            color = fixed4(0, 1, 1, 1);
             break;
         }
         case 1:

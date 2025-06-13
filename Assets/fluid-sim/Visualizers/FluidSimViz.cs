@@ -36,7 +36,7 @@ public struct VisualizationRanges
     public float maxPressure;
 }
 
-public class FluidSimViz : MonoBehaviour
+public partial class FluidSimViz : MonoBehaviour
 {
     public float m_ScalingFactor = 1.0f;
     public Texture2D m_CircleTexture;
@@ -55,15 +55,13 @@ public class FluidSimViz : MonoBehaviour
     public Color m_NegativePressureColor;
     public Color m_NeutralPressureColor;
     public Color m_PositivePressureColor;
+    public Color m_FluidParticleColor;
+    public Color m_ExternalPointsColor;
     public float m_MouseRadius = 1.0f;
     public VisualizationRanges m_Ranges = new VisualizationRanges();
-    
-    Material m_PointInstancedMaterial;
+
     Material m_FluidMaterialDebugViz;
-    Mesh m_PointMesh;
-    ComputeBuffer m_PointRenderArgsBuffer;
-    uint[] m_PointRenderArgsData;
-    
+
     IFluidSim m_FluidSim;
     RectTransform m_RectTransform;
     
@@ -84,6 +82,11 @@ public class FluidSimViz : MonoBehaviour
     Vector2 m_MousePos = Vector2.zero;
     bool m_MousePressed = false;
     InteractionDirection m_InteractionDirection;
+    
+    Material m_PointInstancedMaterial;
+    Mesh m_PointMesh;
+    DrawSimPointsInstanced m_DrawSimPointsInstanced;
+    DrawSimPointsInstanced m_DrawSimPointsInstanced_external;
 
 
     static readonly ProfilerMarker s_UpdatePerfMarker = new ProfilerMarker("FluidSimViz.Update");
@@ -100,12 +103,14 @@ public class FluidSimViz : MonoBehaviour
         m_PointInstancedMaterial = new Material(m_PointInstancedShader);
         m_FluidMaterialDebugViz = new Material(m_FluidMaterialDebugShader);
         m_FluidMeshRenderer.material = m_FluidMaterialDebugViz;
-        InitializePointInstancedRender();
+        m_DrawSimPointsInstanced.InitializePointInstancedRender(m_FluidSim.ParticleCount, m_PointInstancedMaterial);
+        m_DrawSimPointsInstanced_external.InitializePointInstancedRender(0, m_PointInstancedMaterial);
     }
 
     void OnDisable()
     {
-        CleanupPointInstancedRender();
+        m_DrawSimPointsInstanced.CleanupPointInstancedRender();
+        m_DrawSimPointsInstanced_external.CleanupPointInstancedRender();
         m_FluidMeshRenderer.material = null;
         Destroy(m_FluidMaterialDebugViz);
         Destroy(m_PointInstancedMaterial);
@@ -175,7 +180,16 @@ public class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetFloat("_min_velocity", ranges.minVelocity);
 
         if (m_ShowParticles == ParticleVisualizationMode.DrawInstanced)
-            RenderPointsGPU(ranges.maxVelocity);
+        {
+            m_DrawSimPointsInstanced.RenderPointsGPU(ranges.maxVelocity, m_FluidSim.ParticleCount,
+                m_PointBuffer, m_PointVelocityBuffer, m_PointDensitiesBuffer, m_PointPressureBuffer,
+                (int)m_ParticleVisualizationMode, m_FourCornersWorldSpace[0], m_RectTransform.rect.width, m_RectTransform.rect.height,
+                m_FluidSim.Width, m_FluidSim.Height, m_CircleSize, m_ScalingFactor, m_FluidParticleColor);
+            m_DrawSimPointsInstanced_external.RenderPointsGPU(ranges.maxVelocity, m_FluidSim.InputExternalPoints.count,
+                m_FluidSim.InputExternalPoints, m_PointVelocityBuffer, m_PointDensitiesBuffer, m_PointPressureBuffer,
+                (int)m_ParticleVisualizationMode, m_FourCornersWorldSpace[0], m_RectTransform.rect.width, m_RectTransform.rect.height,
+                m_FluidSim.Width, m_FluidSim.Height, m_CircleSize, m_ScalingFactor, m_ExternalPointsColor);
+        }
 
         if (m_MousePressed)
         {
@@ -241,65 +255,6 @@ public class FluidSimViz : MonoBehaviour
         var mouseInSimulationSpace = new Vector2(m_FluidSim.Width * tx, m_FluidSim.Height * ty);
         return mouseInSimulationSpace;
     }
-
-    void InitializePointInstancedRender()
-    {
-        m_PointInstancedMaterial.enableInstancing = true;
-        m_PointMesh = new Mesh();
-        m_PointMesh.SetVertices(new Vector3[]{ new(-0.5f,0.5f,0), new(0.5f,0.5f,0), new(0.5f,-0.5f,0), new(-0.5f,-0.5f,0)});
-        m_PointMesh.SetIndices(new []{ 0,1,2, 2,3,0}, MeshTopology.Triangles, 0);
-        m_PointMesh.Optimize();
-        m_PointRenderArgsData = new uint[]
-        {
-            m_PointMesh.GetIndexCount(0),
-            (uint)m_FluidSim.ParticleCount,
-            m_PointMesh.GetIndexStart(0),
-            m_PointMesh.GetBaseVertex(0),
-            0
-        };
-        m_PointRenderArgsBuffer = new ComputeBuffer(1, m_PointRenderArgsData.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
-        m_PointRenderArgsBuffer.name = "m_PointRenderArgsBuffer";
-    }
-
-    void CleanupPointInstancedRender()
-    {
-        m_PointRenderArgsBuffer.Dispose();
-        Destroy(m_PointMesh);
-    }
-
-    void RenderPointsGPU(float maxVelocity)
-    {
-        
-        m_PointRenderArgsData[1] = (uint)m_FluidSim.ParticleCount;
-        m_PointRenderArgsBuffer.SetData(m_PointRenderArgsData);
-        
-        m_PointInstancedMaterial.SetBuffer("positions", m_PointBuffer); 
-        m_PointInstancedMaterial.SetBuffer("_particle_densities", m_PointDensitiesBuffer);
-        m_PointInstancedMaterial.SetBuffer("_particle_pressures", m_PointPressureBuffer);
-        m_PointInstancedMaterial.SetBuffer("_particle_velocities", m_PointVelocityBuffer);
-        m_PointInstancedMaterial.SetFloat("_max_velocity", maxVelocity);
-        m_PointInstancedMaterial.SetInt("_particleVisMode", (int)m_ParticleVisualizationMode);
-            
-        m_PointInstancedMaterial.SetVector("world_origin", m_FourCornersWorldSpace[0]);
-        m_PointInstancedMaterial.SetFloat("display_area_width", m_RectTransform.rect.width);
-        m_PointInstancedMaterial.SetFloat("display_area_height", m_RectTransform.rect.height);
-
-        m_PointInstancedMaterial.SetInt("point_count", m_FluidSim.ParticleCount);
-        m_PointInstancedMaterial.SetFloat("sim_width", m_FluidSim.Width);
-        m_PointInstancedMaterial.SetFloat("sim_height", m_FluidSim.Height);
-        m_PointInstancedMaterial.SetFloat("circle_size", m_CircleSize);
-        m_PointInstancedMaterial.SetFloat("scaling_factor", m_ScalingFactor);
-        
-        var bounds = new Bounds(Vector3.zero, 10000*Vector3.one); // use tighter bounds
-        Graphics.DrawMeshInstancedIndirect(m_PointMesh, 0, m_PointInstancedMaterial, bounds, m_PointRenderArgsBuffer);
-        
-        // CommandBuffer cmd = new CommandBuffer();
-        // cmd.SetRenderTarget(m_PointRenderTexture);
-        // //cmd.ClearRenderTarget(true, true, Color.red);
-        // Graphics.ExecuteCommandBuffer(cmd);
-        // cmd.Release();
-    }
-    
 
     void OnGUI()
     {

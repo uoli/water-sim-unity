@@ -87,7 +87,7 @@
                 o.vertex = fvertex;
                 o.local_position = v.vertex;
                 
-                color = GetPointColor(_particleVisMode, _particle_pressures[instanceID],  _particle_velocities[instanceID],  _max_velocity);
+                color = GetPointColor(_particleVisMode, _Color, _particle_pressures[instanceID],  _particle_velocities[instanceID],  _max_velocity);
                 o.color = color;
                 
                 return o;

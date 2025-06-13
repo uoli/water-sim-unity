@@ -34,14 +34,19 @@ public class FluidRigibodyInteraction : MonoBehaviour
     {
         var worldPoint = Rigidbody.transform.TransformPoint(rigidBodyPoint);
         var simLocalPoint = m_FluidSim.Transform.InverseTransformPoint(worldPoint);
-        Assert.AreEqual(simLocalPoint.z, 0);
+        const float simWorldSize = 4f; //TODO: get this data instead of hard coding it
+        const float cubeWorldSize = 1f; //TODO: get this data instead of hard coding it
+        var rigidBodyToSimRatio = cubeWorldSize / simWorldSize; 
+        simLocalPoint.x = m_FluidSim.Width / 2f + simLocalPoint.x * m_FluidSim.Width  * rigidBodyToSimRatio;
+        simLocalPoint.y = m_FluidSim.Width / 2f + simLocalPoint.y * m_FluidSim.Height * rigidBodyToSimRatio;
+        //Assert.AreEqual(simLocalPoint.z, 0);
         return simLocalPoint;
     }
     Vector2 TransformDirection(Vector2 rigidBodyDirection)
     {
         var worldDirection = Rigidbody.transform.TransformDirection(rigidBodyDirection);
         var simLocalDirection = m_FluidSim.Transform.InverseTransformDirection(worldDirection);
-        Assert.AreEqual(simLocalDirection.z, 0);
+        //Assert.AreEqual(simLocalDirection.z, 0);
         return simLocalDirection;
     }
 
@@ -80,7 +85,7 @@ public class FluidRigibodyInteraction : MonoBehaviour
         for (var index = 0; index < m_SimResults.Length; index++)
         {
             var simResult = m_SimResults[index];
-            Rigidbody.AddForceAtPosition(simResult.force,m_SurfaceSampler.SurfacePoints[index].position); //TODO: position in its own array would be beneficial here
+            Rigidbody.AddForceAtPosition(simResult.force * Time.deltaTime,m_SurfaceSampler.SurfacePoints[index].position); //TODO: position in its own array would be beneficial here
         }
     }
 
