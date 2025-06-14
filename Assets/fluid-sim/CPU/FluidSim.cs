@@ -304,7 +304,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
                     var distance = Mathf.Sqrt(sqrDst);
                     var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
 
-                    reactionForce += -f.force * (influence / totalKernelWeight) * 3000;
+                    reactionForce += -f.force * (influence / totalKernelWeight) * 300;
                 }
             }
             particleIndices.Dispose();
@@ -472,7 +472,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
         {
             var surfacePoint = rigidBodyPoints[index]; 
 
-            var pressureForce = CalculatePressureForRigidObject(
+            var pressureForce = CalculatePressureAndViscosityForRigidObject(
                 surfacePoint.SimSpacePoint, surfacePoint.velocity, lookupHelper,
                 mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm, viscosityCoefficient,
                 positions, pressures, densities, velocities);
@@ -721,7 +721,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static Vector2 CalculatePressureForRigidObject(Vector2 position, Vector2 surfaceVelocity, GridSpatialLookup lookup, float mass,
+    static Vector2 CalculatePressureAndViscosityForRigidObject(Vector2 position, Vector2 surfaceVelocity, GridSpatialLookup lookup, float mass,
         float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm, float viscosityCoefficient,
         ReadOnlySpan<Vector2> positions, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density, ReadOnlySpan<Vector2> velocities)
     {

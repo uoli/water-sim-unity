@@ -201,7 +201,7 @@ RectTransform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 94077122}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: 0, y: 0, z: -0.01}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -209,7 +209,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 1.666, y: 4.198}
+  m_AnchoredPosition: {x: 1.54, y: 1.156}
   m_SizeDelta: {x: 1, y: 1}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!50 &94077125
@@ -221,12 +221,12 @@ Rigidbody2D:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 94077122}
   m_BodyType: 0
-  m_Simulated: 1
+  m_Simulated: 0
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
-  m_LinearDamping: 0
-  m_AngularDamping: 0.05
+  m_Mass: 0.0002
+  m_LinearDamping: 5
+  m_AngularDamping: 5
   m_GravityScale: 1
   m_Material: {fileID: 0}
   m_IncludeLayers:
@@ -255,7 +255,7 @@ MonoBehaviour:
   - position: {x: -0.5036197, y: -0.09403944}
     normal: {x: -1, y: 0}
   - position: {x: 0.058479548, y: -0.5037806}
-    normal: {x: 0.115429714, y: -0.99331564}
+    normal: {x: 0.026411422, y: -0.9996512}
   - position: {x: 0.50128996, y: -0.5020983}
     normal: {x: 0.73614705, y: -0.6768216}
   - position: {x: -0.5009062, y: -0.49559283}
@@ -273,7 +273,7 @@ MonoBehaviour:
   - position: {x: -0.5056361, y: 0.3005519}
     normal: {x: -1, y: 0}
   - position: {x: -0.49655616, y: 0.49845362}
-    normal: {x: -0.7807982, y: 0.6247834}
+    normal: {x: -0.813755, y: 0.58120805}
   - position: {x: -0.35322154, y: 0.5067563}
     normal: {x: 0, y: 1}
   - position: {x: -0.15638506, y: 0.5037041}
@@ -507,6 +507,8 @@ MonoBehaviour:
   m_NegativePressureColor: {r: 0, g: 0, b: 0, a: 0}
   m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
   m_PositivePressureColor: {r: 1, g: 0, b: 0, a: 0}
+  m_FluidParticleColor: {r: 0, g: 0, b: 0, a: 0}
+  m_ExternalPointsColor: {r: 0, g: 0, b: 0, a: 0}
   m_MouseRadius: 30
   m_Ranges:
     minPressure: 0
@@ -896,7 +898,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 10306, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 2100000, guid: 709f054133582664b801e7619b82a6d7, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -970,10 +972,12 @@ MonoBehaviour:
   m_VelocityScale: 1
   m_DensityVizFactor: 57.4
   m_FieldVisualizationMode: 0
-  m_ParticleVisualizationMode: 1
-  m_NegativePressureColor: {r: 0, g: 0.09055519, b: 0.53333336, a: 0}
-  m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 0}
-  m_PositivePressureColor: {r: 0.735849, g: 0, b: 0, a: 0}
+  m_ParticleVisualizationMode: 0
+  m_NegativePressureColor: {r: 0, g: 0.09055519, b: 0.53333336, a: 1}
+  m_NeutralPressureColor: {r: 1, g: 1, b: 1, a: 1}
+  m_PositivePressureColor: {r: 0.735849, g: 0, b: 0, a: 1}
+  m_FluidParticleColor: {r: 0, g: 0.6117647, b: 1, a: 1}
+  m_ExternalPointsColor: {r: 0, g: 1, b: 0.22655034, a: 1}
   m_MouseRadius: 20
   m_Ranges:
     minPressure: 0
@@ -1005,7 +1009,7 @@ MonoBehaviour:
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
   AutoStep: 1
-  ViscosityFactor: -5
+  ViscosityFactor: 5
   m_InteractionStrength: 100
   m_TargetDensity: 0.18
 --- !u!224 &2014640970
@@ -1041,7 +1045,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Rigidbody: {fileID: 94077125}
-  Area: 1
+  Area: 10
 --- !u!1 &2116198337
 GameObject:
   m_ObjectHideFlags: 0

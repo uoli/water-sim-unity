@@ -33,7 +33,9 @@ public class SurfaceSampler2DEditor : Editor
             
             EditorGUI.BeginChangeCheck();
             
-            var newNormal = Normal2DRotationHandle(center, handleDir1, surfacePoint.normal, size*2);
+            Vector3 worldDir = t.transform.TransformDirection(surfacePoint.normal);
+            
+            var newNormal = Normal2DRotationHandle(center, handleDir1, surfacePoint.normal, worldDir, size*2);
             if (EditorGUI.EndChangeCheck())
             {
                 Undo.RecordObject(t, "Change Surface Sample position");
@@ -50,7 +52,7 @@ public class SurfaceSampler2DEditor : Editor
         }
     }
     
-    Vector2 Normal2DRotationHandle(Vector3 position, Vector3 planeNormal, Vector2 normal2D, float size)
+    Vector2 Normal2DRotationHandle(Vector3 position, Vector3 planeNormal, Vector2 normal2D, Vector3 worldDir, float size)
     {
         var controlID = GUIUtility.GetControlID(FocusType.Passive);
         var evt = Event.current;
@@ -104,7 +106,7 @@ public class SurfaceSampler2DEditor : Editor
                 HandleUtility.AddControl(controlID, distanceToHandle);
                 break;
             case EventType.Repaint:
-                var quat = Quaternion.LookRotation(normal2D, planeNormal);
+                var quat = Quaternion.LookRotation(worldDir, Vector3.forward);
 
                 // Display an orange solid disc where the object is.
                 //Handles.color = new Color(0.5f, 0.8f, 0.4f, 1);
