@@ -157,6 +157,7 @@ public partial class FluidSimViz : MonoBehaviour
         m_FluidMaterialDebugViz.SetBuffer("_particle_pressures", m_PointPressureBuffer);
         m_FluidMaterialDebugViz.SetBuffer("_particle_velocities", m_PointVelocityBuffer);
         m_FluidMaterialDebugViz.SetInt("_PointCount", m_FluidSim.ParticleCount);
+        m_FluidMaterialDebugViz.SetFloat("_mass", m_FluidSim.Mass);
         m_FluidMaterialDebugViz.SetFloat("_scaling_factor", m_ScalingFactor);
         m_FluidMaterialDebugViz.SetFloat("_sim_width", m_FluidSim.Width);
         m_FluidMaterialDebugViz.SetFloat("_sim_height", m_FluidSim.Height);

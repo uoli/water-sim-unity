@@ -587,7 +587,10 @@ public class FluidSim : MonoBehaviour, IFluidSim
 
     public float TargetDensity()
     {
-        return m_ParticleCount / (float)(width * height);
+        //return m_ParticleCount / (float)(width * height);
+        //Target Density of water = 1000 kg/m^2
+        
+        return Mass / ( (float)(width * height) / m_ParticleCount);
     }
 
     float CalcCFLTimeStep(float maxVelocity)

@@ -31,6 +31,7 @@ Shader "Unlit/FluidSimDebugViz"
     StructuredBuffer<float> _particle_pressures;
     StructuredBuffer<float2> _particle_velocities;
     int _PointCount;
+    float _mass;
     float _scaling_factor;
     float _sim_width;
     float _sim_height;
@@ -65,7 +66,6 @@ Shader "Unlit/FluidSimDebugViz"
     }
 
     static const float PI = 3.1415926535897932384626433;
-    static const float mass = 1;
 
     static const float smoothing_kernel_const = 4 / (PI * pow(_smoothingLength, 8));
     static const float squared_smooth_length = _smoothingLength * _smoothingLength;
@@ -103,7 +103,8 @@ Shader "Unlit/FluidSimDebugViz"
         if (dst > radius) return 0;
 
         float scale = 12 / (pow(radius, 4) * PI);
-        return (dst - radius ) * scale;
+        float dif = radius - dst;
+        return -dif * scale;
     }
 
     float squaredDistance(float2 a, float2 b)
@@ -122,7 +123,7 @@ Shader "Unlit/FluidSimDebugViz"
             //float dst = distance(particlePos, pos);
             //float influence = SmoothingKernel(squaredDist);
             float influence = SmoothingKernel2(sqrt(squaredDist), _smoothingLength);
-            density += mass * influence;
+            density += _mass * influence;
         }
 
         return density;
@@ -140,7 +141,7 @@ Shader "Unlit/FluidSimDebugViz"
             float influence = SmoothingKernel2(sqrt(squaredDist), _smoothingLength);
             float density = _particle_densities[i];
             float particle_pressure = _particle_pressures[i];
-            pressure += particle_pressure * mass / density * influence;
+            pressure += particle_pressure * _mass / density * influence;
         }
 
         return pressure;
@@ -161,7 +162,7 @@ Shader "Unlit/FluidSimDebugViz"
             float distance = sqrt(sqrDst);
             //float influence = SmoothingKernelDerivative(distance, sqrDst);
             float influence = SmoothingKernel2Derivative(distance, _smoothingLength);
-            pressureGradient += dir * (pressure * mass) / density * influence;
+            pressureGradient += dir * (pressure * _mass) / density * influence;
         }
 
         return pressureGradient;
@@ -186,7 +187,11 @@ Shader "Unlit/FluidSimDebugViz"
 
         if (_fieldVisMode == 0) {
             float prop = CalculateDensity(localPos);
-            if (prop < _target_density)
+            
+            //float t = inverseLerp(0, _max_density, prop);
+            //    col = lerp(_neutralPressureColor,_positivePressureColor, prop / _max_density);
+            col =  fixed4 (prop / _max_density, 0,0 ,1);
+            /*if (prop < _target_density)
             {
                 float t = inverseLerp(0, _target_density, prop);
                 col = lerp(_negativePressureColor,_neutralPressureColor, t);
@@ -199,7 +204,7 @@ Shader "Unlit/FluidSimDebugViz"
             else
             {
                 col = _neutralPressureColor;
-            }
+            }*/
         } else if (_fieldVisMode == 1) {
             float prop = CalculatePressure(localPos);
             
