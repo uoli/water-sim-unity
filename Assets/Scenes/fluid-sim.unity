@@ -279,12 +279,13 @@ MonoBehaviour:
   SmoothingRadius: 1.44
   TargetDensity: 2
   PressureMultiplier: 2290
-  SubSteps: 2
-  DeltaTime: 0.015
+  MaxStepsPerFrame: 600
+  DeltaTime: 0.008
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
   ExternalForceStrength: 500
   Gravity: 9.8
+  PlacementMode: 0
 --- !u!224 &367632488
 RectTransform:
   m_ObjectHideFlags: 0
@@ -831,9 +832,11 @@ MonoBehaviour:
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
   AutoStep: 1
-  ViscosityFactor: -5
+  MaxStepsPerFrame: 8
+  ViscosityFactor: 1
   m_InteractionStrength: 100
   m_TargetDensity: 0.18
+  PlacementMode: 0
 --- !u!224 &2014640970
 RectTransform:
   m_ObjectHideFlags: 0
