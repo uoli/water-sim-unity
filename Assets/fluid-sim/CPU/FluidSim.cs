@@ -548,8 +548,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
 
         for (var index = 0; index < m_ParticleCount; index++)
         {
+            // Clamp to non-negative: below-target density (free surfaces, wall-truncated
+            // kernels) would otherwise produce attractive pressure, causing particle
+            // clumping and sticking to boundaries.
             var densityError = m_Density[index] - m_TargetDensity;
-            var pressure = densityError * m_PressureMultiplier;
+            var pressure = Mathf.Max(0, densityError * m_PressureMultiplier);
             m_Pressure[index] = pressure;
         }
     }

@@ -169,8 +169,11 @@ void ComputeDensityAndPressure (uint3 id : SV_DispatchThreadID)
     float precalculatedKernelFactor = CalcSmoothingKernel2Factor(SmoothingRadius);
     float density = CalculateDensity(index, precalculatedKernelFactor);
     
+    // Clamp to non-negative: below-target density (free surfaces, wall-truncated
+    // kernels) would otherwise produce attractive pressure, causing particle
+    // clumping and sticking to boundaries.
     float densityError = density - TargetDensity;
-    float pressure = densityError * PressureMultiplier;
+    float pressure = max(0, densityError * PressureMultiplier);
 
     Densities[index] = density;
     Pressure[index] = pressure;
@@ -282,8 +285,10 @@ void ComputePressureForce (uint3 id : SV_DispatchThreadID)
             ForceRadius,
             ForceStrength);
             
-    float2 gravityAcceleration = (float2(0,-1) * Gravity + interactionAcceleration) / density;
-    
+    // Gravity and the interaction force are already accelerations; only the
+    // pressure force needs the division by density.
+    float2 gravityAcceleration = float2(0,-1) * Gravity;
+
     Velocity[index] += (pressureAcceleration + gravityAcceleration + interactionAcceleration) * DeltaTime;
 }
 
