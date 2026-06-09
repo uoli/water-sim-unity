@@ -19,7 +19,9 @@ public struct GridSpatialLookup : IDisposable
     {
         internal int index;
         internal int cellKey;
-        
+        // The actual cell, kept because distinct cells can hash to the same key.
+        internal Vector2Int cell;
+
         public int CompareTo(Entry other)
         {
             return cellKey.CompareTo(other.cellKey);
@@ -73,8 +75,9 @@ public struct GridSpatialLookup : IDisposable
         for (var i = 0; i < positions.Length; i++)
         {
             var position = positions[i];
-            var cellKey = PositionToCellKey(position);
-            m_SpatialLookup[i] = new Entry() { index = i, cellKey = cellKey };
+            var cell = PositionToCell(position);
+            var cellKey = CellPositionToKey(cell);
+            m_SpatialLookup[i] = new Entry() { index = i, cellKey = cellKey, cell = cell };
         }
         
         //Sort array by the cellKey
@@ -107,10 +110,24 @@ public struct GridSpatialLookup : IDisposable
     public void GetParticlesAround(Vector2 position, NativeList<int> particleIndexes)
     {
         var centralCell = PositionToCell(position);
+        Span<int> visitedKeys = stackalloc int[9];
+        var visitedCount = 0;
         foreach (var cellOffset in m_LookupKernel)
         {
             var cell = centralCell + cellOffset;
             var cellKey = CellPositionToKey(cell);
+
+            // Two of the nine neighbor cells can hash to the same key; iterating
+            // that bucket twice would double-count its particles.
+            var alreadyVisited = false;
+            for (var v = 0; v < visitedCount; v++)
+            {
+                if (visitedKeys[v] == cellKey)
+                    alreadyVisited = true;
+            }
+            if (alreadyVisited) continue;
+            visitedKeys[visitedCount++] = cellKey;
+
             //do the lookup
             var lookupStart = m_StartIndices[cellKey];
             if (lookupStart == -1) continue;
@@ -118,6 +135,12 @@ public struct GridSpatialLookup : IDisposable
             {
                 var entry = m_SpatialLookup[i];
                 if (entry.cellKey != cellKey) break;
+                // The bucket can also hold entries from far-away cells that hash
+                // to the same key; only accept the 3x3 neighborhood. Chebyshev
+                // distance <= 1 also picks up the particles of a colliding
+                // neighbor cell on this single visit.
+                var cellDif = entry.cell - centralCell;
+                if (Mathf.Abs(cellDif.x) > 1 || Mathf.Abs(cellDif.y) > 1) continue;
                 particleIndexes.Add(entry.index);
             }
         }

@@ -4,12 +4,15 @@ using UnityEngine;
 using Random = UnityEngine.Random;
 
 [Serializable]
-[StructLayout(LayoutKind.Sequential, Pack = 1)] 
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
 struct SpatialEntry
 {
     internal uint index;
     internal uint cellKey;
-} 
+    // Must match the int2 cell field of the HLSL SpatialEntryData/SpatialEntry structs
+    internal int cellX;
+    internal int cellY;
+}
 
 public class FluidSimGPU : MonoBehaviour, IFluidSim
 {

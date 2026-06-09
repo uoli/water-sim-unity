@@ -6,6 +6,7 @@ struct SpatialEntry
 {
     uint index;
     uint cellKey;
+    int2 cell;
 };
 
 StructuredBuffer<SpatialEntry> InputBuffer;
@@ -36,6 +37,7 @@ void CopyToPadded(uint3 id : SV_DispatchThreadID)
         SpatialEntry sentinel;
         sentinel.index = 0xFFFFFFFFu;
         sentinel.cellKey = 0xFFFFFFFFu;
+        sentinel.cell = int2(0, 0);
         OutputBuffer[i] = sentinel;
     }
 }

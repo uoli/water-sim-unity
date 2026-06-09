@@ -13,6 +13,8 @@ struct SpatialEntryData
 {
     uint index;
     uint cellKey;
+    // The actual cell, kept because distinct cells can hash to the same key.
+    int2 cell;
 };
 
 
@@ -69,9 +71,11 @@ void UpdateSpatialLookup_HashEntries(uint3 id : SV_DispatchThreadID)
 {
     int index = id.x;
     float2 position = PredictedPositions[index];
-    int cellKey = PositionToCellKey(position);
+    int2 cell = PositionToCell(position);
+    uint cellKey = CellPositionToKey(cell);
     SpatialEntry[index].index = index;
     SpatialEntry[index].cellKey = cellKey;
+    SpatialEntry[index].cell = cell;
     StartIndices[index] = -1;
 }
 
@@ -123,19 +127,41 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
 
     //Spatial Accel - Is there a way to make this more modular / reusable?
     int2 centralCell = PositionToCell(pos);
+    uint visitedKeys[9];
+    int visitedCount = 0;
     for (int dx = -1; dx <= 1; dx++)
     {
         for (int dy = -1; dy <= 1; dy++)
         {
             int2 cell = centralCell + int2(dx, dy);
             uint cellKey = CellPositionToKey(cell);
+
+            // Two of the nine neighbor cells can hash to the same key; iterating
+            // that bucket twice would double-count its particles.
+            bool alreadyVisited = false;
+            for (int v = 0; v < visitedCount; v++)
+            {
+                if (visitedKeys[v] == cellKey) alreadyVisited = true;
+            }
+            if (alreadyVisited) continue;
+            visitedKeys[visitedCount] = cellKey;
+            visitedCount++;
+
             int spatialIndex = StartIndices[cellKey];
             if (spatialIndex == -1) continue;
             do
             {
-                uint i = SpatialEntry[spatialIndex].index;
+                SpatialEntryData entry = SpatialEntry[spatialIndex];
                 spatialIndex++;
 
+                // The bucket can also hold entries from far-away cells that hash
+                // to the same key; only accept the 3x3 neighborhood. Chebyshev
+                // distance <= 1 also picks up the particles of a colliding
+                // neighbor cell on this single visit.
+                int2 cellDif = entry.cell - centralCell;
+                if (abs(cellDif.x) > 1 || abs(cellDif.y) > 1) continue;
+
+                uint i = entry.index;
                 float2 neighbourPosition = PredictedPositions[i];
                 float2 diff = neighbourPosition - pos;
                 float sqrDst = dot(diff,diff);
@@ -212,19 +238,38 @@ float2 CalculatePressureGradient(uint i) {
     float2 selfPos = PredictedPositions[i];
 
     int2 centralCell = PositionToCell(selfPos);
+    uint visitedKeys[9];
+    int visitedCount = 0;
     for (int dx = -1; dx <= 1; dx++)
     {
         for (int dy = -1; dy <= 1; dy++)
         {
             int2 cell = centralCell + int2(dx, dy);
             uint cellKey = CellPositionToKey(cell);
+
+            // Two of the nine neighbor cells can hash to the same key; iterating
+            // that bucket twice would double-count its particles.
+            bool alreadyVisited = false;
+            for (int v = 0; v < visitedCount; v++)
+            {
+                if (visitedKeys[v] == cellKey) alreadyVisited = true;
+            }
+            if (alreadyVisited) continue;
+            visitedKeys[visitedCount] = cellKey;
+            visitedCount++;
+
             uint spatialIndex = StartIndices[cellKey];
             if (spatialIndex == -1) continue;
             do
             {
-                uint j = SpatialEntry[spatialIndex].index;
+                SpatialEntryData entry = SpatialEntry[spatialIndex];
                 spatialIndex++;
-                
+
+                // Only accept entries from the 3x3 neighborhood (see CalculateDensity).
+                int2 cellDif = entry.cell - centralCell;
+                if (abs(cellDif.x) > 1 || abs(cellDif.y) > 1) continue;
+
+                uint j = entry.index;
                 if (i == j) continue;
                 float2 neighbourPos = PredictedPositions[j];
                 float2 dif = neighbourPos - selfPos; 
