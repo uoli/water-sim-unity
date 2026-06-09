@@ -44,6 +44,9 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     int[] m_StartIndices;
     ComputeBuffer m_SpatialEntryBuffer;
     ComputeBuffer m_StartIndicesBuffer;
+    ComputeBuffer m_SortPingBuffer;
+    ComputeBuffer m_SortPongBuffer;
+    int m_SortPaddedCount;
     
     float[] m_DebugData;
     ComputeBuffer m_DebugBuffer;
@@ -123,6 +126,14 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_SpatialEntryBuffer.name = "SpatialStartIndicesBuffer";
         m_SpatialEntryBuffer.SetData(m_SpatialEntry);
         m_StartIndicesBuffer.SetData(m_StartIndices);
+
+        // Persistent ping-pong scratch buffers for the GPU bitonic sort, padded
+        // to a power of two as the sort network requires.
+        m_SortPaddedCount = Mathf.NextPowerOfTwo(ParticleCount);
+        m_SortPingBuffer = new ComputeBuffer(m_SortPaddedCount, size);
+        m_SortPingBuffer.name = "SortPingBuffer";
+        m_SortPongBuffer = new ComputeBuffer(m_SortPaddedCount, size);
+        m_SortPongBuffer.name = "SortPongBuffer";
         
         m_DebugBuffer = new ComputeBuffer(m_DebugData.Length, sizeof(float));
         m_DebugBuffer.name = "DebugBuffer";
@@ -145,6 +156,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             m_SpatialEntryBuffer.Release();
         if (m_StartIndicesBuffer != null)
             m_StartIndicesBuffer.Release();
+        if (m_SortPingBuffer != null)
+            m_SortPingBuffer.Release();
+        if (m_SortPongBuffer != null)
+            m_SortPongBuffer.Release();
         
         if (m_DebugBuffer != null)
             m_DebugBuffer.Release();
@@ -211,10 +226,9 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             SimComputeShader.Dispatch(kernelSpatial0, threadGroupsX, 1, 1);
 
             //Sort Spatial Acceleration Tables
-            //TODO: This is the bottleneck right now
-            //It needs to copy things into and out of the GPU
-            //Also it dispatches like 50 jobs
-            ComputeSort(ref m_SpatialEntryBuffer);
+            //TODO: still dispatches O(log^2 n) merge passes; a shared-memory
+            //local sort for blocks that fit in groupshared memory would cut that down.
+            ComputeSort(m_SpatialEntryBuffer);
 
             //Calculate Spatial Acceleration start index
             var kernelSpatial2 = SimComputeShader.FindKernel("UpdateSpatialLookup_UpdateStartIndices");
@@ -288,65 +302,51 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         // }
     }
     
-    void ComputeSort(ref ComputeBuffer targetBuffer)
+    // Sorts targetBuffer by cellKey entirely on the GPU: the entries are copied
+    // into a power-of-two padded scratch buffer (padding filled with a max-value
+    // sentinel so it sorts to the end), bitonic-sorted by ping-ponging between the
+    // two persistent scratch buffers, and copied back. No CPU readback involved.
+    void ComputeSort(ComputeBuffer targetBuffer)
     {
-        var originalCount = targetBuffer.count;
-        var stride = targetBuffer.stride;
-        var paddedCount = Mathf.NextPowerOfTwo(originalCount);
-        
-        //used for ping pong
-        var bufferA = new ComputeBuffer(paddedCount, stride);
-        bufferA.name = "SortPingPongABuffer";
-        var bufferB = new ComputeBuffer(paddedCount, stride);
-        bufferB.name = "SortPingPongBBuffer";
+        var count = targetBuffer.count;
+        var paddedCount = m_SortPaddedCount;
 
-        
-        // Copy input to bufferA
-        var temp = new SpatialEntry[paddedCount];
-        targetBuffer.GetData(temp, 0, 0, originalCount);
-        
-        // Fill unused slots with float.MaxValue or another sentinel value
-        for (var i = originalCount; i < paddedCount; i++)
-        {
-            temp[i] = new SpatialEntry { index = uint.MaxValue, cellKey = uint.MaxValue };
-        }
-        bufferA.SetData(temp);
-        
-        // Sort using ping-ponging between A and B
-        var input = bufferA;
-        var output = bufferB;
-        
-        var kernel = SortComputeShader.FindKernel("BitonicMerge");
-        SortComputeShader.GetKernelThreadGroupSizes(kernel, out var xGroupSize, out _, out _);
-        var groups = Mathf.CeilToInt((float)paddedCount / xGroupSize);
-        
+        var copyToKernel = SortComputeShader.FindKernel("CopyToPadded");
+        var copyFromKernel = SortComputeShader.FindKernel("CopyFromPadded");
+        var mergeKernel = SortComputeShader.FindKernel("BitonicMerge");
+        SortComputeShader.GetKernelThreadGroupSizes(mergeKernel, out var xGroupSize, out _, out _);
+        var paddedGroups = Mathf.CeilToInt((float)paddedCount / xGroupSize);
+
+        SortComputeShader.SetInt("Count", count);
+        SortComputeShader.SetInt("PaddedCount", paddedCount);
+
+        SortComputeShader.SetBuffer(copyToKernel, "InputBuffer", targetBuffer);
+        SortComputeShader.SetBuffer(copyToKernel, "OutputBuffer", m_SortPingBuffer);
+        SortComputeShader.Dispatch(copyToKernel, paddedGroups, 1, 1);
+
+        // Sort using ping-ponging between the persistent scratch buffers
+        var input = m_SortPingBuffer;
+        var output = m_SortPongBuffer;
+
         for (int k = 2; k <= paddedCount; k <<= 1)
         {
             for (int j = k >> 1; j > 0; j >>= 1)
             {
                 SortComputeShader.SetInt("k", k);
                 SortComputeShader.SetInt("j", j);
-                SortComputeShader.SetBuffer(kernel, "InputBuffer", input);
-                SortComputeShader.SetBuffer(kernel, "OutputBuffer", output);
-                SortComputeShader.Dispatch(kernel, groups, 1, 1);
+                SortComputeShader.SetBuffer(mergeKernel, "InputBuffer", input);
+                SortComputeShader.SetBuffer(mergeKernel, "OutputBuffer", output);
+                SortComputeShader.Dispatch(mergeKernel, paddedGroups, 1, 1);
 
                 // Swap input/output for next pass
                 (input, output) = (output, input);
             }
         }
-        
-        // After sorting, `input` holds the sorted result.
-        // Copy the first N elements back to the target buffer.
-        targetBuffer.Dispose();
-        targetBuffer = new ComputeBuffer(originalCount, stride);
-        targetBuffer.name = "SortResultBuffer";
-        var sortedData = new SpatialEntry[originalCount];
-        input.GetData(sortedData, 0, 0, originalCount);
-        targetBuffer.SetData(sortedData);
 
-        // Cleanup
-        bufferA.Dispose();
-        bufferB.Dispose();
+        // After sorting, `input` holds the sorted result.
+        SortComputeShader.SetBuffer(copyFromKernel, "InputBuffer", input);
+        SortComputeShader.SetBuffer(copyFromKernel, "OutputBuffer", targetBuffer);
+        SortComputeShader.Dispatch(copyFromKernel, paddedGroups, 1, 1);
     }
 
     public void Interact(Vector2 mouseInSimulationSpace, float radius, InteractionDirection interactionDirection)
