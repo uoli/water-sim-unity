@@ -164,7 +164,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             externalForceStrength *= -1;
         }
         
-        SimComputeShader.SetFloat("ParticleCount", ParticleCount);
+        SimComputeShader.SetInt("ParticleCount", ParticleCount);
         SimComputeShader.SetFloat("Mass", Mass);
         SimComputeShader.SetFloat("Width", Width);
         SimComputeShader.SetFloat("Height", Height);

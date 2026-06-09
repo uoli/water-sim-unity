@@ -598,8 +598,9 @@ public class FluidSim : MonoBehaviour, IFluidSim
             
             var velDif = velocity[j] - velocity[i];
             var distance = Mathf.Sqrt(sqrDst);
-            //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
-            var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
+            // Viscosity must pull velocities together (force ∝ +(v_j - v_i)), so it needs a
+            // positive kernel weight; the spiky derivative is negative inside the radius.
+            var influence = -SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
             viscosity +=  velDif * mass / density[j] * influence;
         }
         particleIndices.Dispose();
