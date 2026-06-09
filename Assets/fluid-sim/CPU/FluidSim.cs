@@ -27,6 +27,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public float ViscosityFactor = 0.5f;
     public float m_InteractionStrength;
     public float m_TargetDensity;
+    public ParticlePlacementMode PlacementMode = ParticlePlacementMode.GridWithJitter;
 
     
     NativeArray<Vector2> m_Position;
@@ -42,6 +43,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     float m_KernelDerivativeTerm;
     float m_LastStepMaxVelocity;
     float m_TimeAccumulator;
+    ParticlePlacementMode m_LastPlacementMode;
     Vector2 m_MousePosition;
     float m_MouseRadius;
     InteractionDirection m_InteractionDirection;
@@ -122,9 +124,10 @@ public class FluidSim : MonoBehaviour, IFluidSim
         m_Pressure = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
         m_Velocity = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
         m_ViscosityVelocityDelta = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
+        m_LastPlacementMode = PlacementMode;
         for ( var i = 0; i < m_ParticleCount; i++ )
         {
-            var position = new Vector2(Random.Range(0f, width), Random.Range(0f, height));
+            var position = ParticlePlacement.GetPosition(PlacementMode, i, m_ParticleCount, width, height);
             m_Position[i] = position;
             m_PredictedPosition[i] = position;
             m_Density[i] = 0;
@@ -143,7 +146,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     {
         var particleCountDifferent = m_ParticleCount != m_Position.Length;
         var smoothingRadiusDifferent = !m_LookupHelper.IsValid || !Mathf.Approximately(SmoothingLength, m_LookupHelper.CellSize);
-        if (particleCountDifferent)
+        if (particleCountDifferent || PlacementMode != m_LastPlacementMode)
         {
             InitParticles();
         }

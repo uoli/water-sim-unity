@@ -31,6 +31,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float CollisionDamping = 0.5f;
     public float ExternalForceStrength = 10f;
     public float Gravity = 9.8f;
+    public ParticlePlacementMode PlacementMode = ParticlePlacementMode.GridWithJitter;
     
     Vector2[] m_PointPositionData;
     float[] m_PointDensitiesData;
@@ -58,6 +59,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     InteractionDirection m_InteractionDirection;
     IFluidSim m_FluidSimImplementation;
     float m_TimeAccumulator;
+    ParticlePlacementMode m_LastPlacementMode;
 
     int IFluidSim.ParticleCount => ParticleCount;
     float IFluidSim.Mass => Mass;
@@ -95,10 +97,11 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_DebugData = new float[ParticleCount];
         m_PredictedPositionData = new Vector2[ParticleCount];
 
+        m_LastPlacementMode = PlacementMode;
         for ( var i = 0; i < ParticleCount; i++ )
         {
-            var position = new Vector2(Random.Range(0f, Width), Random.Range(0f, Height));
-      
+            var position = ParticlePlacement.GetPosition(PlacementMode, i, ParticleCount, Width, Height);
+
             m_PointPositionData[i] = position;
             m_PointDensitiesData[i] = 0;
             m_PointPressureData[i] = 0;
@@ -172,7 +175,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     // Update is called once per frame
     void Update()
     {
-        if (ParticleCount != m_PointDensitiesBuffer.count)
+        if (ParticleCount != m_PointDensitiesBuffer.count || PlacementMode != m_LastPlacementMode)
         {
             InitParticleData();
         }
