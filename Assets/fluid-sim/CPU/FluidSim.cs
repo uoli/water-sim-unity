@@ -23,9 +23,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public float BoundaryPushStrength = 1;
     public float CollisionDamping = 0.5f;
     public bool AutoStep = true;
+    public int MaxStepsPerFrame = 8;
     public float ViscosityFactor = 0.5f;
     public float m_InteractionStrength;
     public float m_TargetDensity;
+    public ParticlePlacementMode PlacementMode = ParticlePlacementMode.GridWithJitter;
 
     
     NativeArray<Vector2> m_Position;
@@ -33,12 +35,15 @@ public class FluidSim : MonoBehaviour, IFluidSim
     NativeArray<float> m_Density;
     NativeArray<float> m_Pressure;
     NativeArray<Vector2> m_Velocity;
+    NativeArray<Vector2> m_ViscosityVelocityDelta;
     internal GridSpatialLookup m_LookupHelper;
 
     float m_SquaredSmoothingLength;
     float m_KernelTerm;
     float m_KernelDerivativeTerm;
     float m_LastStepMaxVelocity;
+    float m_TimeAccumulator;
+    ParticlePlacementMode m_LastPlacementMode;
     Vector2 m_MousePosition;
     float m_MouseRadius;
     InteractionDirection m_InteractionDirection;
@@ -87,6 +92,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
             m_Pressure.Dispose();
         if (m_Velocity.IsCreated)
             m_Velocity.Dispose();
+        if (m_ViscosityVelocityDelta.IsCreated)
+            m_ViscosityVelocityDelta.Dispose();
         if(m_PredictedPosition.IsCreated)
             m_PredictedPosition.Dispose();
         
@@ -116,9 +123,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
         m_Density = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
         m_Pressure = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
         m_Velocity = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
+        m_ViscosityVelocityDelta = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
+        m_LastPlacementMode = PlacementMode;
         for ( var i = 0; i < m_ParticleCount; i++ )
         {
-            var position = new Vector2(Random.Range(0f, width), Random.Range(0f, height));
+            var position = ParticlePlacement.GetPosition(PlacementMode, i, m_ParticleCount, width, height);
             m_Position[i] = position;
             m_PredictedPosition[i] = position;
             m_Density[i] = 0;
@@ -137,7 +146,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     {
         var particleCountDifferent = m_ParticleCount != m_Position.Length;
         var smoothingRadiusDifferent = !m_LookupHelper.IsValid || !Mathf.Approximately(SmoothingLength, m_LookupHelper.CellSize);
-        if (particleCountDifferent)
+        if (particleCountDifferent || PlacementMode != m_LastPlacementMode)
         {
             InitParticles();
         }
@@ -151,22 +160,62 @@ public class FluidSim : MonoBehaviour, IFluidSim
     void Update()
     {
         DoReInitializationIfNecessary();
-        
+
         if (AutoStep)
-            DoUpdate();
+            AdvanceTime(Time.deltaTime);
     }
 
+    // Advance the simulation by frameTime of wall-clock time, taking fixed-size
+    // substeps so simulation speed is independent of framerate.
+    public void AdvanceTime(float frameTime)
+    {
+        using var markerScope = s_UpdatePerfMarker.Auto();
+
+        if (SimulationStep <= 0)
+            return;
+
+        CachePrecomputedValues();
+        m_TimeAccumulator += frameTime;
+        var steps = 0;
+        while (m_TimeAccumulator >= SimulationStep && steps < MaxStepsPerFrame)
+        {
+            var stepTime = CurrentStepTime();
+            StepSimulation(stepTime);
+            m_TimeAccumulator -= stepTime;
+            steps++;
+        }
+        // Running behind realtime: drop the surplus so the sim slows down gracefully
+        // instead of accumulating an ever-growing debt of steps.
+        if (steps == MaxStepsPerFrame)
+            m_TimeAccumulator = 0;
+
+        m_MouseRadius = 0; //clear mouse interaction
+        UpdateComputeBuffers();
+    }
+
+    // Advance exactly one substep, ignoring wall-clock time (editor step button).
     public void DoUpdate()
     {
         using var markerScope = s_UpdatePerfMarker.Auto();
-        
+
         CachePrecomputedValues();
+        StepSimulation(CurrentStepTime());
+        m_MouseRadius = 0; //clear mouse interaction
+        UpdateComputeBuffers();
+    }
+
+    float CurrentStepTime()
+    {
         var stepTime = SimulationStep;
         if (UseAdaptativeStepTime)
         {
             stepTime = Mathf.Min(SimulationStep, CalcCFLTimeStep(m_LastStepMaxVelocity));
         }
-        
+        return stepTime;
+    }
+
+    void StepSimulation(float stepTime)
+    {
         JobHandle dependencyJobHandle = default;
 
         var predictPositionJob = new PredictPositionJob
@@ -179,14 +228,16 @@ public class FluidSim : MonoBehaviour, IFluidSim
         var predictPositionJobHandle = predictPositionJob.ScheduleParallelByRef(m_PredictedPosition.Length,
             64, dependencyJobHandle);
         predictPositionJobHandle.Complete();
-        
+
         m_LookupHelper.UpdateParticles(m_PredictedPosition);
-        
+
         CalculateParticlesDensity();
         CalculateParticlePressure();
         SimulateStep(stepTime);
-        m_MouseRadius = 0; //clear mouse interaction
+    }
 
+    void UpdateComputeBuffers()
+    {
         m_PositionComputeBuffer.Update(m_Position);
         m_DensityComputeBuffer .Update(m_Density);
         m_PressureComputeBuffer.Update(m_Pressure);
@@ -303,14 +354,14 @@ public class FluidSim : MonoBehaviour, IFluidSim
                     velocity.x *= -collisionDamping;
                 }
             }
-            var distToBottomWall = Mathf.Abs(height - position.y);
-            if (distToBottomWall < smoothingLength)
+            var distToTopWall = Mathf.Abs(height - position.y);
+            if (distToTopWall < smoothingLength)
             {
-                var strength = (smoothingLength - distToBottomWall) / smoothingLength;
+                var strength = (smoothingLength - distToTopWall) / smoothingLength;
                 velocity.y -= boundaryPushStrength * strength * deltaTime;
                 if (position.y > height)
                 {
-                    position.y = height;
+                    position.y = height - (position.y - height);
                     velocity.y *= -collisionDamping;
                 }
             }
@@ -347,9 +398,14 @@ public class FluidSim : MonoBehaviour, IFluidSim
         }
     }
     
+    // Viscosity is split into two passes: this one reads the velocity field
+    // read-only and writes per-particle deltas, and ApplyVelocityDeltasJob adds
+    // them afterwards. Writing velocities in place here would race with the
+    // neighbor reads happening concurrently on other threads.
     [BurstCompile]
     struct CalculateViscosityForceJob : IJobFor
     {
+        [ReadOnly]
         public NativeArray<Vector2> velocities;
         [ReadOnly]
         public NativeArray<Vector2> positions;
@@ -357,6 +413,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
         public NativeArray<float> densities;
         [ReadOnly]
         public GridSpatialLookup lookupHelper;
+        [WriteOnly]
+        public NativeArray<Vector2> velocityDeltas;
         public float mass;
         public float smoothingLength;
         public float squaredSmoothingLength;
@@ -365,12 +423,23 @@ public class FluidSim : MonoBehaviour, IFluidSim
         public float deltaTime;
         public void Execute(int index)
         {
-            var density = densities[index]; 
+            var density = densities[index];
             var viscosityForce = CalculateViscosityForce(index, lookupHelper, mass, smoothingLength, squaredSmoothingLength, viscosityFactor,
                 positions, velocities, densities);
             var viscosityAcceleration = viscosityForce / density;
-            var velocity = viscosityAcceleration * deltaTime;
-            velocities[index] += velocity;
+            velocityDeltas[index] = viscosityAcceleration * deltaTime;
+        }
+    }
+
+    [BurstCompile]
+    struct ApplyVelocityDeltasJob : IJobFor
+    {
+        public NativeArray<Vector2> velocities;
+        [ReadOnly]
+        public NativeArray<Vector2> velocityDeltas;
+        public void Execute(int index)
+        {
+            velocities[index] += velocityDeltas[index];
         }
     }
 
@@ -414,6 +483,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             positions = m_PredictedPosition,
             densities = m_Density,
             velocities = m_Velocity,
+            velocityDeltas = m_ViscosityVelocityDelta,
             deltaTime = deltaTime,
             lookupHelper = m_LookupHelper,
             mass = Mass,
@@ -423,7 +493,15 @@ public class FluidSim : MonoBehaviour, IFluidSim
         };
         var viscosityJobHandle = viscosityJob.ScheduleParallelByRef(m_Position.Length,
             64, velocityFromPressureJobHandle);
-        
+
+        var applyViscosityJob = new ApplyVelocityDeltasJob()
+        {
+            velocities = m_Velocity,
+            velocityDeltas = m_ViscosityVelocityDelta,
+        };
+        var applyViscosityJobHandle = applyViscosityJob.ScheduleParallelByRef(m_Position.Length,
+            64, viscosityJobHandle);
+
         var job = new CalculatePositionFromVelocityJobFor()
         {
             positions = m_Position,
@@ -436,7 +514,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             collisionDamping = CollisionDamping,
         };
         var velocityJobHandle = job.ScheduleParallelByRef(m_Position.Length,
-            64, viscosityJobHandle);
+            64, applyViscosityJobHandle);
         velocityJobHandle.Complete();
 
         //TODO: this is only needed next frame so this can be backgrounded.
@@ -548,8 +626,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
 
         for (var index = 0; index < m_ParticleCount; index++)
         {
+            // Clamp to non-negative: below-target density (free surfaces, wall-truncated
+            // kernels) would otherwise produce attractive pressure, causing particle
+            // clumping and sticking to boundaries.
             var densityError = m_Density[index] - m_TargetDensity;
-            var pressure = densityError * m_PressureMultiplier;
+            var pressure = Mathf.Max(0, densityError * m_PressureMultiplier);
             m_Pressure[index] = pressure;
         }
     }
@@ -598,8 +679,9 @@ public class FluidSim : MonoBehaviour, IFluidSim
             
             var velDif = velocity[j] - velocity[i];
             var distance = Mathf.Sqrt(sqrDst);
-            //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
-            var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
+            // Viscosity must pull velocities together (force ∝ +(v_j - v_i)), so it needs a
+            // positive kernel weight; the spiky derivative is negative inside the radius.
+            var influence = -SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
             viscosity +=  velDif * mass / density[j] * influence;
         }
         particleIndices.Dispose();
