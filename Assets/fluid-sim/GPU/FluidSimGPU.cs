@@ -22,7 +22,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float SmoothingRadius = 1.4f;
     public float TargetDensity = 0.01f;
     public float PressureMultiplier = 50;
-    public int SubSteps = 1;
+    public int MaxStepsPerFrame = 8;
     public float DeltaTime = 0.001f;
     public float BoundaryPushStrength = 0;
     public float CollisionDamping = 0.5f;
@@ -51,6 +51,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     float m_ExternalForceRadius;
     InteractionDirection m_InteractionDirection;
     IFluidSim m_FluidSimImplementation;
+    float m_TimeAccumulator;
 
     int IFluidSim.ParticleCount => ParticleCount;
     float IFluidSim.Mass => Mass;
@@ -181,8 +182,14 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("ForceStrength", externalForceStrength); 
         SimComputeShader.SetFloat("Gravity", Gravity);
 
-        for (uint i = 0; i < SubSteps; ++i)
+        // Fixed-timestep accumulator: take DeltaTime-sized substeps to cover the
+        // elapsed wall-clock time, so simulation speed is independent of framerate.
+        m_TimeAccumulator += Time.deltaTime;
+        var steps = 0;
+        while (DeltaTime > 0 && m_TimeAccumulator >= DeltaTime && steps < MaxStepsPerFrame)
         {
+            steps++;
+            m_TimeAccumulator -= DeltaTime;
 
             //Predicted Positions
             var kernelIndex0 = SimComputeShader.FindKernel("ComputePredictedPositions");
@@ -254,6 +261,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
             SimComputeShader.Dispatch(kernelIndex3, threadGroupsX, 1, 1);
         }
+        // Running behind realtime: drop the surplus so the sim slows down gracefully
+        // instead of accumulating an ever-growing debt of steps.
+        if (steps == MaxStepsPerFrame)
+            m_TimeAccumulator = 0;
         /*
         m_PointBuffer.GetData(m_PointPositionData);
         m_PointDensitiesBuffer.GetData(m_PointDensitiesData);

@@ -23,6 +23,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public float BoundaryPushStrength = 1;
     public float CollisionDamping = 0.5f;
     public bool AutoStep = true;
+    public int MaxStepsPerFrame = 8;
     public float ViscosityFactor = 0.5f;
     public float m_InteractionStrength;
     public float m_TargetDensity;
@@ -39,6 +40,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     float m_KernelTerm;
     float m_KernelDerivativeTerm;
     float m_LastStepMaxVelocity;
+    float m_TimeAccumulator;
     Vector2 m_MousePosition;
     float m_MouseRadius;
     InteractionDirection m_InteractionDirection;
@@ -151,22 +153,62 @@ public class FluidSim : MonoBehaviour, IFluidSim
     void Update()
     {
         DoReInitializationIfNecessary();
-        
+
         if (AutoStep)
-            DoUpdate();
+            AdvanceTime(Time.deltaTime);
     }
 
+    // Advance the simulation by frameTime of wall-clock time, taking fixed-size
+    // substeps so simulation speed is independent of framerate.
+    public void AdvanceTime(float frameTime)
+    {
+        using var markerScope = s_UpdatePerfMarker.Auto();
+
+        if (SimulationStep <= 0)
+            return;
+
+        CachePrecomputedValues();
+        m_TimeAccumulator += frameTime;
+        var steps = 0;
+        while (m_TimeAccumulator >= SimulationStep && steps < MaxStepsPerFrame)
+        {
+            var stepTime = CurrentStepTime();
+            StepSimulation(stepTime);
+            m_TimeAccumulator -= stepTime;
+            steps++;
+        }
+        // Running behind realtime: drop the surplus so the sim slows down gracefully
+        // instead of accumulating an ever-growing debt of steps.
+        if (steps == MaxStepsPerFrame)
+            m_TimeAccumulator = 0;
+
+        m_MouseRadius = 0; //clear mouse interaction
+        UpdateComputeBuffers();
+    }
+
+    // Advance exactly one substep, ignoring wall-clock time (editor step button).
     public void DoUpdate()
     {
         using var markerScope = s_UpdatePerfMarker.Auto();
-        
+
         CachePrecomputedValues();
+        StepSimulation(CurrentStepTime());
+        m_MouseRadius = 0; //clear mouse interaction
+        UpdateComputeBuffers();
+    }
+
+    float CurrentStepTime()
+    {
         var stepTime = SimulationStep;
         if (UseAdaptativeStepTime)
         {
             stepTime = Mathf.Min(SimulationStep, CalcCFLTimeStep(m_LastStepMaxVelocity));
         }
-        
+        return stepTime;
+    }
+
+    void StepSimulation(float stepTime)
+    {
         JobHandle dependencyJobHandle = default;
 
         var predictPositionJob = new PredictPositionJob
@@ -179,14 +221,16 @@ public class FluidSim : MonoBehaviour, IFluidSim
         var predictPositionJobHandle = predictPositionJob.ScheduleParallelByRef(m_PredictedPosition.Length,
             64, dependencyJobHandle);
         predictPositionJobHandle.Complete();
-        
+
         m_LookupHelper.UpdateParticles(m_PredictedPosition);
-        
+
         CalculateParticlesDensity();
         CalculateParticlePressure();
         SimulateStep(stepTime);
-        m_MouseRadius = 0; //clear mouse interaction
+    }
 
+    void UpdateComputeBuffers()
+    {
         m_PositionComputeBuffer.Update(m_Position);
         m_DensityComputeBuffer .Update(m_Density);
         m_PressureComputeBuffer.Update(m_Pressure);
