@@ -34,6 +34,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     NativeArray<float> m_Density;
     NativeArray<float> m_Pressure;
     NativeArray<Vector2> m_Velocity;
+    NativeArray<Vector2> m_ViscosityVelocityDelta;
     internal GridSpatialLookup m_LookupHelper;
 
     float m_SquaredSmoothingLength;
@@ -89,6 +90,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
             m_Pressure.Dispose();
         if (m_Velocity.IsCreated)
             m_Velocity.Dispose();
+        if (m_ViscosityVelocityDelta.IsCreated)
+            m_ViscosityVelocityDelta.Dispose();
         if(m_PredictedPosition.IsCreated)
             m_PredictedPosition.Dispose();
         
@@ -118,6 +121,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
         m_Density = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
         m_Pressure = new NativeArray<float>(m_ParticleCount, Allocator.Persistent);
         m_Velocity = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
+        m_ViscosityVelocityDelta = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
         for ( var i = 0; i < m_ParticleCount; i++ )
         {
             var position = new Vector2(Random.Range(0f, width), Random.Range(0f, height));
@@ -391,9 +395,14 @@ public class FluidSim : MonoBehaviour, IFluidSim
         }
     }
     
+    // Viscosity is split into two passes: this one reads the velocity field
+    // read-only and writes per-particle deltas, and ApplyVelocityDeltasJob adds
+    // them afterwards. Writing velocities in place here would race with the
+    // neighbor reads happening concurrently on other threads.
     [BurstCompile]
     struct CalculateViscosityForceJob : IJobFor
     {
+        [ReadOnly]
         public NativeArray<Vector2> velocities;
         [ReadOnly]
         public NativeArray<Vector2> positions;
@@ -401,6 +410,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
         public NativeArray<float> densities;
         [ReadOnly]
         public GridSpatialLookup lookupHelper;
+        [WriteOnly]
+        public NativeArray<Vector2> velocityDeltas;
         public float mass;
         public float smoothingLength;
         public float squaredSmoothingLength;
@@ -409,12 +420,23 @@ public class FluidSim : MonoBehaviour, IFluidSim
         public float deltaTime;
         public void Execute(int index)
         {
-            var density = densities[index]; 
+            var density = densities[index];
             var viscosityForce = CalculateViscosityForce(index, lookupHelper, mass, smoothingLength, squaredSmoothingLength, viscosityFactor,
                 positions, velocities, densities);
             var viscosityAcceleration = viscosityForce / density;
-            var velocity = viscosityAcceleration * deltaTime;
-            velocities[index] += velocity;
+            velocityDeltas[index] = viscosityAcceleration * deltaTime;
+        }
+    }
+
+    [BurstCompile]
+    struct ApplyVelocityDeltasJob : IJobFor
+    {
+        public NativeArray<Vector2> velocities;
+        [ReadOnly]
+        public NativeArray<Vector2> velocityDeltas;
+        public void Execute(int index)
+        {
+            velocities[index] += velocityDeltas[index];
         }
     }
 
@@ -458,6 +480,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             positions = m_PredictedPosition,
             densities = m_Density,
             velocities = m_Velocity,
+            velocityDeltas = m_ViscosityVelocityDelta,
             deltaTime = deltaTime,
             lookupHelper = m_LookupHelper,
             mass = Mass,
@@ -467,7 +490,15 @@ public class FluidSim : MonoBehaviour, IFluidSim
         };
         var viscosityJobHandle = viscosityJob.ScheduleParallelByRef(m_Position.Length,
             64, velocityFromPressureJobHandle);
-        
+
+        var applyViscosityJob = new ApplyVelocityDeltasJob()
+        {
+            velocities = m_Velocity,
+            velocityDeltas = m_ViscosityVelocityDelta,
+        };
+        var applyViscosityJobHandle = applyViscosityJob.ScheduleParallelByRef(m_Position.Length,
+            64, viscosityJobHandle);
+
         var job = new CalculatePositionFromVelocityJobFor()
         {
             positions = m_Position,
@@ -480,7 +511,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             collisionDamping = CollisionDamping,
         };
         var velocityJobHandle = job.ScheduleParallelByRef(m_Position.Length,
-            64, viscosityJobHandle);
+            64, applyViscosityJobHandle);
         velocityJobHandle.Complete();
 
         //TODO: this is only needed next frame so this can be backgrounded.
