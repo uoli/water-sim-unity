@@ -14,8 +14,14 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public int width;
     public int height;
     public float Gravity = 9.8f;
-    public float Mass = 1;
-    public float SmoothingLength = 10;
+    // The fluid's rest density. Particle mass and target density derive from
+    // this and the particle spacing, so the knobs stay independent of
+    // resolution and domain size.
+    public float RestDensity = 1f;
+    // Kernel support radius in units of particle spacing. ~2 gives ~12
+    // neighbors in 2D; raise for smoother fields at higher cost.
+    [Range(1.2f, 4f)]
+    public float SmoothingRadiusInSpacings = 2f;
     public float m_PressureMultiplier = 1;
     public bool UseAdaptativeStepTime = false;
     [Range(0, 0.3f)]
@@ -26,7 +32,6 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public int MaxStepsPerFrame = 8;
     public float ViscosityFactor = 0.5f;
     public float m_InteractionStrength;
-    public float m_TargetDensity;
     public ParticlePlacementMode PlacementMode = ParticlePlacementMode.GridWithJitter;
 
     
@@ -64,11 +69,16 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public ComputeBuffer GetPressures() { return m_PressureComputeBuffer.Buffer; }
     public ComputeBuffer GetVelocities() { return m_VelocitiesComputeBuffer.Buffer; }
     public int ParticleCount => m_ParticleCount;
-    float IFluidSim.Mass => Mass;
     public int Height => height;
     public int Width => width;
     public float SmoothingRadius => SmoothingLength;
-    float IFluidSim.TargetDensity => m_TargetDensity;
+    float IFluidSim.TargetDensity => RestDensity;
+
+    // Derived quantities: the spacing comes from how many particles fill the
+    // box, and mass follows so that a uniform fill sits exactly at RestDensity.
+    public float ParticleSpacing => Mathf.Sqrt(width * height / (float)Mathf.Max(1, m_ParticleCount));
+    public float Mass => RestDensity * ParticleSpacing * ParticleSpacing;
+    public float SmoothingLength => SmoothingRadiusInSpacings * ParticleSpacing;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -525,24 +535,19 @@ public class FluidSim : MonoBehaviour, IFluidSim
         }
     }
 
-    public float TargetDensity()
-    {
-        return m_ParticleCount / (float)(width * height);
-    }
-
     float CalcCFLTimeStep(float maxVelocity)
     {
         const float courantNumber = 0.3f;
-        const float speedOfSound = 10.0f;
+        // For the linear EOS p = k * (density - rest), the speed of sound is sqrt(k).
+        var speedOfSound = Mathf.Sqrt(Mathf.Max(1e-6f, m_PressureMultiplier));
         return courantNumber * SmoothingLength / (speedOfSound + maxVelocity);
     }
-    
+
     void CachePrecomputedValues()
     {
         m_SquaredSmoothingLength = SmoothingLength*SmoothingLength;
         m_KernelTerm = SmoothingKernels.CalcSmoothingKernel2Factor(SmoothingLength);
         m_KernelDerivativeTerm = SmoothingKernels.CalcSmoothingKernelDerivativeNormalization(SmoothingLength);
-        //m_TargetDensity = CalcTargetDensity();
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -629,7 +634,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             // Clamp to non-negative: below-target density (free surfaces, wall-truncated
             // kernels) would otherwise produce attractive pressure, causing particle
             // clumping and sticking to boundaries.
-            var densityError = m_Density[index] - m_TargetDensity;
+            var densityError = m_Density[index] - RestDensity;
             var pressure = Mathf.Max(0, densityError * m_PressureMultiplier);
             m_Pressure[index] = pressure;
         }

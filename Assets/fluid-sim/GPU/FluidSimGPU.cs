@@ -21,9 +21,14 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public int ParticleCount = 100;
     public int Width = 100;
     public int Height = 100;
-    public float Mass = 1;
-    public float SmoothingRadius = 1.4f;
-    public float TargetDensity = 0.01f;
+    // The fluid's rest density. Particle mass and target density derive from
+    // this and the particle spacing, so the knobs stay independent of
+    // resolution and domain size.
+    public float RestDensity = 1f;
+    // Kernel support radius in units of particle spacing. ~2 gives ~12
+    // neighbors in 2D; raise for smoother fields at higher cost.
+    [Range(1.2f, 4f)]
+    public float SmoothingRadiusInSpacings = 2f;
     public float PressureMultiplier = 50;
     public int MaxStepsPerFrame = 8;
     public float DeltaTime = 0.001f;
@@ -62,11 +67,15 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     ParticlePlacementMode m_LastPlacementMode;
 
     int IFluidSim.ParticleCount => ParticleCount;
-    float IFluidSim.Mass => Mass;
     int IFluidSim.Height => Height;
     int IFluidSim.Width => Width;
-    float IFluidSim.SmoothingRadius => SmoothingRadius;
-    float IFluidSim.TargetDensity => TargetDensity;
+
+    // Derived quantities: the spacing comes from how many particles fill the
+    // box, and mass follows so that a uniform fill sits exactly at RestDensity.
+    public float ParticleSpacing => Mathf.Sqrt(Width * Height / (float)Mathf.Max(1, ParticleCount));
+    public float Mass => RestDensity * ParticleSpacing * ParticleSpacing;
+    public float SmoothingRadius => SmoothingRadiusInSpacings * ParticleSpacing;
+    public float TargetDensity => RestDensity;
     public bool HasDataInCompute => true;
     public GridSpatialLookup LookupHelper => throw new NotImplementedException();
     public ComputeBuffer GetDensities() { return m_PointDensitiesBuffer; }
