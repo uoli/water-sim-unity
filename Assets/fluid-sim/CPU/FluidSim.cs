@@ -347,14 +347,14 @@ public class FluidSim : MonoBehaviour, IFluidSim
                     velocity.x *= -collisionDamping;
                 }
             }
-            var distToBottomWall = Mathf.Abs(height - position.y);
-            if (distToBottomWall < smoothingLength)
+            var distToTopWall = Mathf.Abs(height - position.y);
+            if (distToTopWall < smoothingLength)
             {
-                var strength = (smoothingLength - distToBottomWall) / smoothingLength;
+                var strength = (smoothingLength - distToTopWall) / smoothingLength;
                 velocity.y -= boundaryPushStrength * strength * deltaTime;
                 if (position.y > height)
                 {
-                    position.y = height;
+                    position.y = height - (position.y - height);
                     velocity.y *= -collisionDamping;
                 }
             }

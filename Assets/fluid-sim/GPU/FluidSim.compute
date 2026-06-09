@@ -332,18 +332,17 @@ void ComputePositionFromVelocityAndHandleCollision(uint3 id : SV_DispatchThreadI
             velocity.x *= -CollisionDamping;
         }
     }
-    float distToBottomWall = abs(Height - position.y);
-    if (distToBottomWall < SmoothingRadius)
+    float distToTopWall = abs(Height - position.y);
+    if (distToTopWall < SmoothingRadius)
     {
-        float strength = (SmoothingRadius - distToBottomWall) / SmoothingRadius;
+        float strength = (SmoothingRadius - distToTopWall) / SmoothingRadius;
         velocity.y -= BoundaryPushStrength * strength * DeltaTime;
         if (position.y > Height)
         {
-            position.y = Height;
+            position.y = Height - (position.y - Height);
             velocity.y *= -CollisionDamping;
         }
     }
-    Positions[index] = position;
     Positions[index] = position;
     Velocity[index] = velocity;
 }
