@@ -62,7 +62,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     ComputeBuffer m_CellStartsBuffer;
     ComputeBuffer m_ScatterOffsetsBuffer;
     ComputeBuffer m_BlockSumsBuffer;
-    ComputeBuffer m_ViscosityDeltaBuffer;
+    ComputeBuffer m_VelocityDeltaBuffer;
 
     const int k_ScanBlockSize = 512;
 
@@ -74,11 +74,12 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     int m_KernelAddBlockOffsets;
     int m_KernelScatter;
     int m_KernelDensityPressure;
-    int m_KernelPressureForce;
-    int m_KernelViscosity;
+    int m_KernelForces;
     int m_KernelIntegrate;
     int m_GroupsParticles;
+    int m_GroupsTable;
     int m_ScanBlockCount;
+    int m_CellTableSize;
     
     float[] m_DebugData;
     ComputeBuffer m_DebugBuffer;
@@ -169,8 +170,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_PointDensitiesBuffer.name = "PressureBuffer";
         m_PointVelocityBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
         m_PointVelocityBuffer.name = "VelocityBuffer";
-        m_ViscosityDeltaBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
-        m_ViscosityDeltaBuffer.name = "ViscosityDeltaBuffer";
+        m_VelocityDeltaBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
+        m_VelocityDeltaBuffer.name = "VelocityDeltaBuffer";
         m_PointBuffer.SetData(m_PointPositionData);
         m_PointDensitiesBuffer.SetData(m_PointDensitiesData);
         m_PointPressureBuffer.SetData(m_PointDensitiesData);
@@ -183,13 +184,16 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_UnsortedSpatialEntryBuffer = new ComputeBuffer(ParticleCount, size);
         m_UnsortedSpatialEntryBuffer.name = "UnsortedSpatialEntriesBuffer";
 
-        // Counting-sort cell table. The table size equals ParticleCount (the
-        // hash modulus); BlockSums holds one total per scan block.
-        m_CellCountsBuffer = new ComputeBuffer(ParticleCount, sizeof(uint));
+        // Counting-sort cell table. Sized at ~2x the particle count (rounded to
+        // a power of two so the hash modulo is a bit-mask): a load factor of
+        // ~0.5 keeps hash buckets mostly unshared, so neighbor queries waste
+        // less time rejecting entries from far-away colliding cells.
+        m_CellTableSize = Mathf.Min(k_ScanBlockSize * k_ScanBlockSize, Mathf.NextPowerOfTwo(ParticleCount * 2));
+        m_CellCountsBuffer = new ComputeBuffer(m_CellTableSize, sizeof(uint));
         m_CellCountsBuffer.name = "CellCountsBuffer";
-        m_CellStartsBuffer = new ComputeBuffer(ParticleCount, sizeof(uint));
+        m_CellStartsBuffer = new ComputeBuffer(m_CellTableSize, sizeof(uint));
         m_CellStartsBuffer.name = "CellStartsBuffer";
-        m_ScatterOffsetsBuffer = new ComputeBuffer(ParticleCount, sizeof(uint));
+        m_ScatterOffsetsBuffer = new ComputeBuffer(m_CellTableSize, sizeof(uint));
         m_ScatterOffsetsBuffer.name = "ScatterOffsetsBuffer";
         m_BlockSumsBuffer = new ComputeBuffer(k_ScanBlockSize, sizeof(uint));
         m_BlockSumsBuffer.name = "ScanBlockSumsBuffer";
@@ -214,16 +218,17 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_KernelAddBlockOffsets = SimComputeShader.FindKernel("SpatialAddBlockOffsets");
         m_KernelScatter = SimComputeShader.FindKernel("SpatialScatter");
         m_KernelDensityPressure = SimComputeShader.FindKernel("ComputeDensityAndPressure");
-        m_KernelPressureForce = SimComputeShader.FindKernel("ComputePressureForce");
-        m_KernelViscosity = SimComputeShader.FindKernel("ComputeViscosity");
+        m_KernelForces = SimComputeShader.FindKernel("ComputeForces");
         m_KernelIntegrate = SimComputeShader.FindKernel("ComputePositionFromVelocityAndHandleCollision");
 
         m_GroupsParticles = Mathf.CeilToInt(ParticleCount / 64f);
-        m_ScanBlockCount = Mathf.CeilToInt(ParticleCount / (float)k_ScanBlockSize);
-        if (m_ScanBlockCount > k_ScanBlockSize)
-            Debug.LogError($"ParticleCount {ParticleCount} exceeds the two-level scan limit of {k_ScanBlockSize * k_ScanBlockSize}.");
+        m_GroupsTable = Mathf.CeilToInt(m_CellTableSize / 64f);
+        m_ScanBlockCount = Mathf.CeilToInt(m_CellTableSize / (float)k_ScanBlockSize);
+        if (ParticleCount * 2 > k_ScanBlockSize * k_ScanBlockSize)
+            Debug.LogError($"ParticleCount {ParticleCount} exceeds the cell table limit of {k_ScanBlockSize * k_ScanBlockSize / 2}; expect degraded neighbor lookups.");
 
         SimComputeShader.SetInt("NumBlocks", m_ScanBlockCount);
+        SimComputeShader.SetInt("CellTableSize", m_CellTableSize);
 
         SimComputeShader.SetBuffer(m_KernelPredict, "Positions", m_PointBuffer);
         SimComputeShader.SetBuffer(m_KernelPredict, "PredictedPositions", m_PredictedPositionBuffer);
@@ -257,25 +262,18 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetBuffer(m_KernelDensityPressure, "Densities", m_PointDensitiesBuffer);
         SimComputeShader.SetBuffer(m_KernelDensityPressure, "Pressure", m_PointPressureBuffer);
 
-        SimComputeShader.SetBuffer(m_KernelPressureForce, "SpatialEntry", m_SpatialEntryBuffer);
-        SimComputeShader.SetBuffer(m_KernelPressureForce, "CellStarts", m_CellStartsBuffer);
-        SimComputeShader.SetBuffer(m_KernelPressureForce, "CellCounts", m_CellCountsBuffer);
-        SimComputeShader.SetBuffer(m_KernelPressureForce, "PredictedPositions", m_PredictedPositionBuffer);
-        SimComputeShader.SetBuffer(m_KernelPressureForce, "Densities", m_PointDensitiesBuffer);
-        SimComputeShader.SetBuffer(m_KernelPressureForce, "Pressure", m_PointPressureBuffer);
-        SimComputeShader.SetBuffer(m_KernelPressureForce, "Velocity", m_PointVelocityBuffer);
-
-        SimComputeShader.SetBuffer(m_KernelViscosity, "SpatialEntry", m_SpatialEntryBuffer);
-        SimComputeShader.SetBuffer(m_KernelViscosity, "CellStarts", m_CellStartsBuffer);
-        SimComputeShader.SetBuffer(m_KernelViscosity, "CellCounts", m_CellCountsBuffer);
-        SimComputeShader.SetBuffer(m_KernelViscosity, "PredictedPositions", m_PredictedPositionBuffer);
-        SimComputeShader.SetBuffer(m_KernelViscosity, "Densities", m_PointDensitiesBuffer);
-        SimComputeShader.SetBuffer(m_KernelViscosity, "Velocity", m_PointVelocityBuffer);
-        SimComputeShader.SetBuffer(m_KernelViscosity, "ViscosityDelta", m_ViscosityDeltaBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "SpatialEntry", m_SpatialEntryBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "CellStarts", m_CellStartsBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "CellCounts", m_CellCountsBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "PredictedPositions", m_PredictedPositionBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "Densities", m_PointDensitiesBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "Pressure", m_PointPressureBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "Velocity", m_PointVelocityBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "VelocityDelta", m_VelocityDeltaBuffer);
 
         SimComputeShader.SetBuffer(m_KernelIntegrate, "Positions", m_PointBuffer);
         SimComputeShader.SetBuffer(m_KernelIntegrate, "Velocity", m_PointVelocityBuffer);
-        SimComputeShader.SetBuffer(m_KernelIntegrate, "ViscosityDelta", m_ViscosityDeltaBuffer);
+        SimComputeShader.SetBuffer(m_KernelIntegrate, "VelocityDelta", m_VelocityDeltaBuffer);
     }
     void CleanupComputeBuffers()
     {
@@ -289,8 +287,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             m_PointPressureBuffer.Release();
         if (m_PointVelocityBuffer != null)
             m_PointVelocityBuffer.Release();
-        if (m_ViscosityDeltaBuffer != null)
-            m_ViscosityDeltaBuffer.Release();
+        if (m_VelocityDeltaBuffer != null)
+            m_VelocityDeltaBuffer.Release();
 
         if (m_SpatialEntryBuffer != null)
             m_SpatialEntryBuffer.Release();
@@ -360,18 +358,17 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
 
             //Build the spatial lookup with a counting sort keyed by cell
             s_SortPerfMarker.Begin();
-            SimComputeShader.Dispatch(m_KernelSpatialClear, m_GroupsParticles, 1, 1); // cell table size == ParticleCount
+            SimComputeShader.Dispatch(m_KernelSpatialClear, m_GroupsTable, 1, 1);
             SimComputeShader.Dispatch(m_KernelSpatialHashAndCount, m_GroupsParticles, 1, 1);
             SimComputeShader.Dispatch(m_KernelScanBlocks, m_ScanBlockCount, 1, 1);
             SimComputeShader.Dispatch(m_KernelScanBlockSums, 1, 1, 1);
-            SimComputeShader.Dispatch(m_KernelAddBlockOffsets, m_GroupsParticles, 1, 1);
+            SimComputeShader.Dispatch(m_KernelAddBlockOffsets, m_GroupsTable, 1, 1);
             SimComputeShader.Dispatch(m_KernelScatter, m_GroupsParticles, 1, 1);
             s_SortPerfMarker.End();
 
             s_SimKernelsPerfMarker.Begin();
             SimComputeShader.Dispatch(m_KernelDensityPressure, m_GroupsParticles, 1, 1);
-            SimComputeShader.Dispatch(m_KernelPressureForce, m_GroupsParticles, 1, 1);
-            SimComputeShader.Dispatch(m_KernelViscosity, m_GroupsParticles, 1, 1);
+            SimComputeShader.Dispatch(m_KernelForces, m_GroupsParticles, 1, 1);
             SimComputeShader.Dispatch(m_KernelIntegrate, m_GroupsParticles, 1, 1);
             s_SimKernelsPerfMarker.End();
         }
