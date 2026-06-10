@@ -38,6 +38,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float CollisionDamping = 0.5f;
     public float ExternalForceStrength = 10f;
     public float Gravity = 9.8f;
+    public float ViscosityFactor = 0.5f;
     public ParticlePlacementMode PlacementMode = ParticlePlacementMode.GridWithJitter;
     // Fraction of the box (from the bottom) the fluid occupies at rest. Below 1
     // there is a free surface, so the fluid can slosh and splash.
@@ -61,6 +62,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     ComputeBuffer m_StartIndicesBuffer;
     ComputeBuffer m_SortPingBuffer;
     ComputeBuffer m_SortPongBuffer;
+    ComputeBuffer m_ViscosityDeltaBuffer;
     int m_SortPaddedCount;
     
     float[] m_DebugData;
@@ -150,6 +152,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_PointDensitiesBuffer.name = "PressureBuffer";
         m_PointVelocityBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
         m_PointVelocityBuffer.name = "VelocityBuffer";
+        m_ViscosityDeltaBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
+        m_ViscosityDeltaBuffer.name = "ViscosityDeltaBuffer";
         m_PointBuffer.SetData(m_PointPositionData);
         m_PointDensitiesBuffer.SetData(m_PointDensitiesData);
         m_PointPressureBuffer.SetData(m_PointDensitiesData);
@@ -188,6 +192,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             m_PointPressureBuffer.Release();
         if (m_PointVelocityBuffer != null)
             m_PointVelocityBuffer.Release();
+        if (m_ViscosityDeltaBuffer != null)
+            m_ViscosityDeltaBuffer.Release();
 
         if (m_SpatialEntryBuffer != null)
             m_SpatialEntryBuffer.Release();
@@ -234,6 +240,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("ForceCenterY", m_ExternalForceCenter.y);
         SimComputeShader.SetFloat("ForceStrength", externalForceStrength); 
         SimComputeShader.SetFloat("Gravity", Gravity);
+        SimComputeShader.SetFloat("ViscosityFactor", ViscosityFactor);
 
         // Fixed-timestep accumulator: take deltaTime-sized substeps to cover the
         // elapsed wall-clock time, so simulation speed is independent of framerate.
@@ -303,12 +310,25 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
             SimComputeShader.Dispatch(kernelIndex2, threadGroupsX, 1, 1);
 
+            //Calculate Viscosity (into a delta buffer; applied by the next kernel)
+            var kernelViscosity = SimComputeShader.FindKernel("ComputeViscosity");
+            SimComputeShader.GetKernelThreadGroupSizes(kernelViscosity, out xGroupSize, out yGroupSize, out zGroupSize);
+            SimComputeShader.SetBuffer(kernelViscosity, "SpatialEntry", m_SpatialEntryBuffer);
+            SimComputeShader.SetBuffer(kernelViscosity, "StartIndices", m_StartIndicesBuffer);
+            SimComputeShader.SetBuffer(kernelViscosity, "PredictedPositions", m_PredictedPositionBuffer);
+            SimComputeShader.SetBuffer(kernelViscosity, "Densities", m_PointDensitiesBuffer);
+            SimComputeShader.SetBuffer(kernelViscosity, "Velocity", m_PointVelocityBuffer);
+            SimComputeShader.SetBuffer(kernelViscosity, "ViscosityDelta", m_ViscosityDeltaBuffer);
+            threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
+            SimComputeShader.Dispatch(kernelViscosity, threadGroupsX, 1, 1);
+
             var kernelIndex3 = SimComputeShader.FindKernel("ComputePositionFromVelocityAndHandleCollision");
             SimComputeShader.GetKernelThreadGroupSizes(kernelIndex3, out xGroupSize, out yGroupSize, out zGroupSize);
             SimComputeShader.SetBuffer(kernelIndex3, "Positions", m_PointBuffer);
             SimComputeShader.SetBuffer(kernelIndex3, "Densities", m_PointDensitiesBuffer);
             SimComputeShader.SetBuffer(kernelIndex3, "Pressure", m_PointPressureBuffer);
             SimComputeShader.SetBuffer(kernelIndex3, "Velocity", m_PointVelocityBuffer);
+            SimComputeShader.SetBuffer(kernelIndex3, "ViscosityDelta", m_ViscosityDeltaBuffer);
             SimComputeShader.SetBuffer(kernelIndex3, "DebugBuff", m_DebugBuffer);
             threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
             SimComputeShader.Dispatch(kernelIndex3, threadGroupsX, 1, 1);

@@ -285,6 +285,7 @@ MonoBehaviour:
   CollisionDamping: 0.5
   ExternalForceStrength: 2000
   Gravity: 40
+  ViscosityFactor: 0.5
   PlacementMode: 0
   FillFraction: 0.6
 --- !u!224 &367632488
