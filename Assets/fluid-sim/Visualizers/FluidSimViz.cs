@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Profiling;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public enum FieldVisualizationMode
 {
@@ -77,6 +78,11 @@ public class FluidSimViz : MonoBehaviour
     ComputeBuffer m_PointVelocityBuffer;
 
     float m_KineticEnergy = 0;
+    VisualizationRanges m_CachedDynamicRanges;
+    bool m_StatsRequestInFlight;
+    AsyncGPUReadbackRequest m_DensityRequest;
+    AsyncGPUReadbackRequest m_PressureRequest;
+    AsyncGPUReadbackRequest m_VelocityRequest;
     GUIContent energyContent = new GUIContent();
     Vector3[] m_FourCornersWorldSpace = new Vector3[4];
     Vector3[] m_FourCornersScreenSpace = new Vector3[4];
@@ -183,35 +189,62 @@ public class FluidSimViz : MonoBehaviour
         }
     }
 
+    // The ranges only normalize the visualization, so they tolerate a few
+    // frames of latency. Asynchronous readback avoids the synchronous GetData
+    // stall, which drains the whole queued GPU pipeline (all substeps of the
+    // sim) before returning and dominates frame time.
     VisualizationRanges CalculateStats()
     {
-        m_FluidSim.GetDensities().GetData(m_PointDensitiesData);
-        m_FluidSim.GetPressures().GetData(m_PointPressureData);;
-        m_FluidSim.GetVelocities().GetData(m_PointVelocityData);;
-        
+        if (m_StatsRequestInFlight && m_DensityRequest.done && m_PressureRequest.done && m_VelocityRequest.done)
+        {
+            m_StatsRequestInFlight = false;
+            if (!m_DensityRequest.hasError && !m_PressureRequest.hasError && !m_VelocityRequest.hasError)
+            {
+                ComputeStats(m_DensityRequest.GetData<float>(),
+                    m_PressureRequest.GetData<float>(),
+                    m_VelocityRequest.GetData<Vector2>());
+            }
+        }
+
+        if (!m_StatsRequestInFlight)
+        {
+            m_DensityRequest = AsyncGPUReadback.Request(m_FluidSim.GetDensities());
+            m_PressureRequest = AsyncGPUReadback.Request(m_FluidSim.GetPressures());
+            m_VelocityRequest = AsyncGPUReadback.Request(m_FluidSim.GetVelocities());
+            m_StatsRequestInFlight = true;
+        }
+
+        return m_CachedDynamicRanges;
+    }
+
+    void ComputeStats(NativeArray<float> densities, NativeArray<float> pressures, NativeArray<Vector2> velocities)
+    {
+        if (densities.Length == 0 || pressures.Length == 0)
+            return;
+
         var maxDensity = 0f;
-        for (var index = 0; index < m_FluidSim.ParticleCount; index++)
+        for (var index = 0; index < densities.Length; index++)
         {
-            if (m_PointDensitiesData[index] > maxDensity)
-                maxDensity = m_PointDensitiesData[index];
+            if (densities[index] > maxDensity)
+                maxDensity = densities[index];
         }
-        
-        var maxPressure = m_PointPressureData[0];
-        var minPressure = m_PointPressureData[0];
-        for (var index = 0; index < m_FluidSim.ParticleCount; index++)
+
+        var maxPressure = pressures[0];
+        var minPressure = pressures[0];
+        for (var index = 0; index < pressures.Length; index++)
         {
-            if(m_PointPressureData[index] > maxPressure)
-                maxPressure = m_PointPressureData[index];
-            if (m_PointPressureData[index] < minPressure)
-                minPressure = m_PointPressureData[index];
+            if(pressures[index] > maxPressure)
+                maxPressure = pressures[index];
+            if (pressures[index] < minPressure)
+                minPressure = pressures[index];
         }
-        
+
         m_KineticEnergy = 0;
         var minVelocity = 0f;
         var maxVelocity = 1f;
-        for (var index = 0; index < m_FluidSim.ParticleCount; index++)
+        for (var index = 0; index < velocities.Length; index++)
         {
-            var velocity = m_PointVelocityData[index];
+            var velocity = velocities[index];
             m_KineticEnergy += 0.5f * m_FluidSim.Mass * Vector2.Dot(velocity, velocity);
             minVelocity = Mathf.Min(velocity.sqrMagnitude, minVelocity);
             maxVelocity = Mathf.Max(velocity.sqrMagnitude, maxVelocity);
@@ -219,7 +252,7 @@ public class FluidSimViz : MonoBehaviour
         minVelocity = Mathf.Sqrt(minVelocity);
         maxVelocity = Mathf.Sqrt(maxVelocity);
 
-        return new VisualizationRanges
+        m_CachedDynamicRanges = new VisualizationRanges
         {
             minPressure = minPressure,
             maxDensity = maxDensity,
