@@ -2,6 +2,7 @@
 #pragma kernel ComputePredictedPositions
 #pragma kernel ComputeDensityAndPressure
 #pragma kernel ComputePressureForce
+#pragma kernel ComputeViscosity
 #pragma kernel ComputePositionFromVelocityAndHandleCollision
 #pragma kernel UpdateSpatialLookup_HashEntries
 #pragma kernel UpdateSpatialLookup_UpdateStartIndices
@@ -23,6 +24,7 @@ RWStructuredBuffer<float2> PredictedPositions;
 RWStructuredBuffer<float> Densities;
 RWStructuredBuffer<float> Pressure;
 RWStructuredBuffer<float2> Velocity;
+RWStructuredBuffer<float2> ViscosityDelta;
 RWStructuredBuffer<float> DebugBuff;
 RWStructuredBuffer<SpatialEntryData> SpatialEntry;
 RWStructuredBuffer<int> StartIndices;
@@ -42,6 +44,7 @@ float ForceCenterX;
 float ForceCenterY;
 float ForceStrength;
 float Gravity;
+float ViscosityFactor;
 
 
 int2 PositionToCell(float2 position)
@@ -337,13 +340,79 @@ void ComputePressureForce (uint3 id : SV_DispatchThreadID)
     Velocity[index] += (pressureAcceleration + gravityAcceleration + interactionAcceleration) * DeltaTime;
 }
 
+// Viscosity pulls a particle's velocity toward its neighbors'. The result is
+// written to ViscosityDelta and applied by the integration kernel: writing
+// Velocity here would race with the neighbor velocity reads happening
+// concurrently in other threads, and all forces should be computed from the
+// same consistent velocity field.
+[numthreads(64,1,1)]
+void ComputeViscosity(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if ((int)i >= ParticleCount) return;
+
+    float2 selfPos = PredictedPositions[i];
+    float2 selfVel = Velocity[i];
+    float2 viscosityForce = 0;
+
+    int2 centralCell = PositionToCell(selfPos);
+    uint visitedKeys[9];
+    int visitedCount = 0;
+    for (int dx = -1; dx <= 1; dx++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            int2 cell = centralCell + int2(dx, dy);
+            uint cellKey = CellPositionToKey(cell);
+
+            // Two of the nine neighbor cells can hash to the same key; iterating
+            // that bucket twice would double-count its particles.
+            bool alreadyVisited = false;
+            for (int v = 0; v < visitedCount; v++)
+            {
+                if (visitedKeys[v] == cellKey) alreadyVisited = true;
+            }
+            if (alreadyVisited) continue;
+            visitedKeys[visitedCount] = cellKey;
+            visitedCount++;
+
+            uint spatialIndex = StartIndices[cellKey];
+            if (spatialIndex == -1) continue;
+            do
+            {
+                SpatialEntryData entry = SpatialEntry[spatialIndex];
+                spatialIndex++;
+
+                // Only accept entries from the 3x3 neighborhood (see CalculateDensity).
+                int2 cellDif = entry.cell - centralCell;
+                if (abs(cellDif.x) > 1 || abs(cellDif.y) > 1) continue;
+
+                uint j = entry.index;
+                if (i == j) continue;
+                float2 dif = PredictedPositions[j] - selfPos;
+                float sqrDst = dot(dif, dif);
+                if (sqrDst > SquaredSmoothingRadius) continue;
+
+                float distance = sqrt(sqrDst);
+                // Needs a positive kernel weight so the force points toward the
+                // neighbor's velocity; the spiky derivative is negative inside
+                // the radius.
+                float influence = -SmoothingKernel2Derivative(distance, SmoothingRadius);
+                viscosityForce += (Velocity[j] - selfVel) * Mass / Densities[j] * influence;
+
+            } while (spatialIndex < (uint)ParticleCount && SpatialEntry[spatialIndex].cellKey == cellKey);
+        }
+    }
+    ViscosityDelta[i] = viscosityForce * ViscosityFactor / Densities[i] * DeltaTime;
+}
+
 [numthreads(64,1,1)]
 void ComputePositionFromVelocityAndHandleCollision(uint3 id : SV_DispatchThreadID)
 {
     int index = id.x;
 
     float2 position = Positions[index];
-    float2 velocity = Velocity[index];
+    float2 velocity = Velocity[index] + ViscosityDelta[index];
     position += velocity * DeltaTime;
             
     if (position.x < SmoothingRadius)
