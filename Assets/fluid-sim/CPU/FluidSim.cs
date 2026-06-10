@@ -304,7 +304,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
                     var distance = Mathf.Sqrt(sqrDst);
                     var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
 
-                    reactionForce += -f.force * (influence / totalKernelWeight) * 300;
+                    reactionForce += -f.impulse * (influence / totalKernelWeight) * 300;
                 }
             }
             particleIndices.Dispose();
@@ -476,10 +476,13 @@ public class FluidSim : MonoBehaviour, IFluidSim
                 surfacePoint.SimSpacePoint, surfacePoint.velocity, lookupHelper,
                 mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm, viscosityCoefficient,
                 positions, pressures, densities, velocities);
-            var force = pressureForce * surfacePoint.areaWeight * deltaTime; //TODO: not sure about the deltaTime here
+            // Integrating the force over this step's dt up front makes the
+            // output an impulse: the consumer no longer needs to know (or
+            // guess) which timestep the simulation used.
+            var impulse = pressureForce * surfacePoint.areaWeight * deltaTime;
             outputSurfacePoints[index] = new OutputSimulationSurfacePoints
             {
-                force = force
+                impulse = impulse
             };
         }
     }

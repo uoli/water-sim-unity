@@ -116,8 +116,11 @@ public class FluidRigibodyInteraction : MonoBehaviour
             // The sampled point is in the body's local space; the force must be
             // applied at its world position or the resulting torque is wrong.
             var worldPoint = (Vector2)Rigidbody.transform.TransformPoint(m_SurfaceSampler.SurfacePoints[index].position);
-            var worldForce = SimToWorldVector(simResult.force) * ForceScale;
-            Rigidbody.AddForceAtPosition(worldForce * Time.deltaTime, worldPoint);
+            // The sim reports the momentum exchanged during its step; Impulse
+            // mode transfers it exactly, independent of how render frames align
+            // with physics steps. No further dt belongs here.
+            var worldImpulse = SimToWorldVector(simResult.impulse) * ForceScale;
+            Rigidbody.AddForceAtPosition(worldImpulse, worldPoint, ForceMode2D.Impulse);
         }
     }
 

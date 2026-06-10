@@ -17,7 +17,9 @@ public struct InputSimulationSurfacePoints
 }
 public struct OutputSimulationSurfacePoints
 {
-    public Vector2 force;
+    // Momentum exchanged with the fluid during the sim step (the surface force
+    // already integrated over the step's dt) — apply with ForceMode2D.Impulse.
+    public Vector2 impulse;
 }
 
 
