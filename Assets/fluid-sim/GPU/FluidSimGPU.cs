@@ -31,6 +31,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float SmoothingRadiusInSpacings = 2f;
     public float PressureMultiplier = 50;
     public int MaxStepsPerFrame = 8;
+    // Derive the substep from the CFL condition instead of using DeltaTime.
+    public bool AutoDeltaTime = true;
     public float DeltaTime = 0.001f;
     public float BoundaryPushStrength = 0;
     public float CollisionDamping = 0.5f;
@@ -81,6 +83,20 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float Mass => RestDensity * ParticleSpacing * ParticleSpacing;
     public float SmoothingRadius => SmoothingRadiusInSpacings * ParticleSpacing;
     public float TargetDensity => RestDensity;
+    public float EffectiveDeltaTime => AutoDeltaTime ? CalcCFLDeltaTime() : DeltaTime;
+
+    // CFL bound: a substep must not let information travel more than a fraction
+    // of the kernel radius. The velocity scale is the speed of sound of the
+    // linear EOS (sqrt of the pressure multiplier) plus the worst-case
+    // free-fall speed over the box height; the GPU path never reads particle
+    // data back, so the actual max velocity is not available.
+    float CalcCFLDeltaTime()
+    {
+        const float courantNumber = 0.3f;
+        var speedOfSound = Mathf.Sqrt(Mathf.Max(1e-6f, PressureMultiplier));
+        var freeFallSpeed = Mathf.Sqrt(2f * Mathf.Abs(Gravity) * Height);
+        return courantNumber * SmoothingRadius / (speedOfSound + freeFallSpeed);
+    }
     public bool HasDataInCompute => true;
     public GridSpatialLookup LookupHelper => throw new NotImplementedException();
     public ComputeBuffer GetDensities() { return m_PointDensitiesBuffer; }
@@ -209,7 +225,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("PressureMultiplier", PressureMultiplier);
         SimComputeShader.SetFloat("SmoothingRadius", SmoothingRadius);
         SimComputeShader.SetFloat("SquaredSmoothingRadius", SmoothingRadius * SmoothingRadius);
-        SimComputeShader.SetFloat("DeltaTime", DeltaTime);
+        var deltaTime = EffectiveDeltaTime;
+        SimComputeShader.SetFloat("DeltaTime", deltaTime);
         SimComputeShader.SetFloat("BoundaryPushStrength", BoundaryPushStrength);
         SimComputeShader.SetFloat("CollisionDamping", CollisionDamping); 
         SimComputeShader.SetFloat("ForceRadius", m_ExternalForceRadius); 
@@ -218,14 +235,14 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("ForceStrength", externalForceStrength); 
         SimComputeShader.SetFloat("Gravity", Gravity);
 
-        // Fixed-timestep accumulator: take DeltaTime-sized substeps to cover the
+        // Fixed-timestep accumulator: take deltaTime-sized substeps to cover the
         // elapsed wall-clock time, so simulation speed is independent of framerate.
         m_TimeAccumulator += Time.deltaTime;
         var steps = 0;
-        while (DeltaTime > 0 && m_TimeAccumulator >= DeltaTime && steps < MaxStepsPerFrame)
+        while (deltaTime > 0 && m_TimeAccumulator >= deltaTime && steps < MaxStepsPerFrame)
         {
             steps++;
-            m_TimeAccumulator -= DeltaTime;
+            m_TimeAccumulator -= deltaTime;
 
             //Predicted Positions
             var kernelIndex0 = SimComputeShader.FindKernel("ComputePredictedPositions");

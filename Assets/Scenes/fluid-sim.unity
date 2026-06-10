@@ -279,6 +279,7 @@ MonoBehaviour:
   SmoothingRadiusInSpacings: 2
   PressureMultiplier: 60000
   MaxStepsPerFrame: 20
+  AutoDeltaTime: 1
   DeltaTime: 0.001
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
