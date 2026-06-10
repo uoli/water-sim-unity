@@ -6,10 +6,16 @@ using UnityEngine.Assertions;
 public class FluidRigibodyInteraction : MonoBehaviour
 {
     public Rigidbody2D Rigidbody;
+    // Sim-space surface length the sample points represent in total (2D
+    // "area" is a perimeter); each point gets an equal share.
     public float Area;
-    
+    // Conversion between the simulation's arbitrary mass unit and kilograms.
+    // Lengths and times are converted exactly; mass is the one free unit.
+    public float ForceScale = 1f;
+
     SurfaceSampler2D m_SurfaceSampler;
     IFluidSim m_FluidSim;
+    RectTransform m_SimRect;
     OutputSimulationSurfacePoints[] m_SimResults;
     InputSimulationSurfacePoints[] m_SimInput;
 
@@ -17,6 +23,7 @@ public class FluidRigibodyInteraction : MonoBehaviour
     {
         m_SurfaceSampler = Rigidbody.GetComponent<SurfaceSampler2D>();
         m_FluidSim = GetComponent<IFluidSim>();
+        m_SimRect = m_FluidSim.Transform.GetComponent<RectTransform>();
         m_FluidSim.PreSimulation += PreSimulation;
         m_FluidSim.PostSimulation += PostSimulation;
 
@@ -30,24 +37,40 @@ public class FluidRigibodyInteraction : MonoBehaviour
         m_FluidSim.PostSimulation -= PostSimulation;
     }
 
-    Vector2 TransformPoint(Vector2 rigidBodyPoint)
+    // ---- World <-> simulation space ----
+    // The simulation is Width x Height sim units, displayed on the quad whose
+    // RectTransform is cached in m_SimRect. Everything crossing the boundary
+    // (positions, velocities, forces) must go through these conversions; the
+    // sim-units-per-world-unit factor is Width / rect.width, which is far
+    // from 1.
+
+    Vector2 WorldToSimPoint(Vector2 worldPoint)
     {
-        var worldPoint = Rigidbody.transform.TransformPoint(rigidBodyPoint);
-        var simLocalPoint = m_FluidSim.Transform.InverseTransformPoint(worldPoint);
-        const float simWorldSize = 4f; //TODO: get this data instead of hard coding it
-        const float cubeWorldSize = 1f; //TODO: get this data instead of hard coding it
-        var rigidBodyToSimRatio = cubeWorldSize / simWorldSize; 
-        simLocalPoint.x = m_FluidSim.Width / 2f + simLocalPoint.x * m_FluidSim.Width  * rigidBodyToSimRatio;
-        simLocalPoint.y = m_FluidSim.Width / 2f + simLocalPoint.y * m_FluidSim.Height * rigidBodyToSimRatio;
-        //Assert.AreEqual(simLocalPoint.z, 0);
-        return simLocalPoint;
+        Vector2 local = m_FluidSim.Transform.InverseTransformPoint(worldPoint);
+        var rect = m_SimRect.rect;
+        // Deliberately unclamped (unlike Rect.PointToNormalized) so points
+        // outside the tank still map continuously.
+        return new Vector2(
+            (local.x - rect.xMin) / rect.width * m_FluidSim.Width,
+            (local.y - rect.yMin) / rect.height * m_FluidSim.Height);
     }
-    Vector2 TransformDirection(Vector2 rigidBodyDirection)
+
+    Vector2 WorldToSimVector(Vector2 worldVector)
     {
-        var worldDirection = Rigidbody.transform.TransformDirection(rigidBodyDirection);
-        var simLocalDirection = m_FluidSim.Transform.InverseTransformDirection(worldDirection);
-        //Assert.AreEqual(simLocalDirection.z, 0);
-        return simLocalDirection;
+        Vector2 local = m_FluidSim.Transform.InverseTransformVector(worldVector);
+        var rect = m_SimRect.rect;
+        return new Vector2(
+            local.x * m_FluidSim.Width / rect.width,
+            local.y * m_FluidSim.Height / rect.height);
+    }
+
+    Vector2 SimToWorldVector(Vector2 simVector)
+    {
+        var rect = m_SimRect.rect;
+        var local = new Vector2(
+            simVector.x * rect.width / m_FluidSim.Width,
+            simVector.y * rect.height / m_FluidSim.Height);
+        return m_FluidSim.Transform.TransformVector(local);
     }
 
     Vector2 CalcSurfacePointVelocity(Vector2 worldPoint)
@@ -72,9 +95,10 @@ public class FluidRigibodyInteraction : MonoBehaviour
 
             m_SimInput[i] = new InputSimulationSurfacePoints
             {
-                SimSpacePoint = TransformPoint(p.position),
-                normal = TransformDirection(p.normal),
-                velocity = CalcSurfacePointVelocity(worldPoint),
+                SimSpacePoint = WorldToSimPoint(worldPoint),
+                // Re-normalized because a non-square mapping skews directions.
+                normal = WorldToSimVector(Rigidbody.transform.TransformDirection(p.normal)).normalized,
+                velocity = WorldToSimVector(CalcSurfacePointVelocity(worldPoint)),
                 areaWeight = areaWeight
             };
         }
@@ -92,7 +116,8 @@ public class FluidRigibodyInteraction : MonoBehaviour
             // The sampled point is in the body's local space; the force must be
             // applied at its world position or the resulting torque is wrong.
             var worldPoint = (Vector2)Rigidbody.transform.TransformPoint(m_SurfaceSampler.SurfacePoints[index].position);
-            Rigidbody.AddForceAtPosition(simResult.force * Time.deltaTime, worldPoint);
+            var worldForce = SimToWorldVector(simResult.force) * ForceScale;
+            Rigidbody.AddForceAtPosition(worldForce * Time.deltaTime, worldPoint);
         }
     }
 
