@@ -275,16 +275,16 @@ MonoBehaviour:
   ParticleCount: 20000
   Width: 100
   Height: 100
-  Mass: 1
-  SmoothingRadius: 1.44
-  TargetDensity: 2
-  PressureMultiplier: 2290
-  SubSteps: 2
-  DeltaTime: 0.015
+  RestDensity: 1
+  SmoothingRadiusInSpacings: 2
+  PressureMultiplier: 25000
+  MaxStepsPerFrame: 12
+  DeltaTime: 0.002
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
   ExternalForceStrength: 500
   Gravity: 9.8
+  PlacementMode: 0
 --- !u!224 &367632488
 RectTransform:
   m_ObjectHideFlags: 0
