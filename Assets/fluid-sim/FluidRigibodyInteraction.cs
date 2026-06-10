@@ -50,12 +50,15 @@ public class FluidRigibodyInteraction : MonoBehaviour
         return simLocalDirection;
     }
 
-    Vector2 CalcSurfacePointVelocity(Vector2 rigidBodyPoint)
+    Vector2 CalcSurfacePointVelocity(Vector2 worldPoint)
     {
-        Vector2 localOffset = rigidBodyPoint - Rigidbody.position;
-        Vector2 surfacePointVelocity = Rigidbody.linearVelocity + 
-            Rigidbody.angularVelocity * Vector2.Perpendicular(localOffset);
-        return surfacePointVelocity;
+        // Lever arm in world space about the actual center of mass. The sampled
+        // point is stored in the body's local space and must not be mixed with
+        // world-space positions.
+        Vector2 offset = worldPoint - Rigidbody.worldCenterOfMass;
+        // Rigidbody2D.angularVelocity is in degrees per second.
+        var omega = Rigidbody.angularVelocity * Mathf.Deg2Rad;
+        return Rigidbody.linearVelocity + omega * Vector2.Perpendicular(offset);
     }
 
     void PreSimulation()
@@ -65,12 +68,13 @@ public class FluidRigibodyInteraction : MonoBehaviour
         for (var i = 0; i < points.Count; i++)
         {
             var p = points[i];
-            
+            var worldPoint = (Vector2)Rigidbody.transform.TransformPoint(p.position);
+
             m_SimInput[i] = new InputSimulationSurfacePoints
             {
                 SimSpacePoint = TransformPoint(p.position),
                 normal = TransformDirection(p.normal),
-                velocity = CalcSurfacePointVelocity(p.position),
+                velocity = CalcSurfacePointVelocity(worldPoint),
                 areaWeight = areaWeight
             };
         }
@@ -85,7 +89,10 @@ public class FluidRigibodyInteraction : MonoBehaviour
         for (var index = 0; index < m_SimResults.Length; index++)
         {
             var simResult = m_SimResults[index];
-            Rigidbody.AddForceAtPosition(simResult.force * Time.deltaTime,m_SurfaceSampler.SurfacePoints[index].position); //TODO: position in its own array would be beneficial here
+            // The sampled point is in the body's local space; the force must be
+            // applied at its world position or the resulting torque is wrong.
+            var worldPoint = (Vector2)Rigidbody.transform.TransformPoint(m_SurfaceSampler.SurfacePoints[index].position);
+            Rigidbody.AddForceAtPosition(simResult.force * Time.deltaTime, worldPoint);
         }
     }
 
