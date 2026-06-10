@@ -840,14 +840,15 @@ public class FluidSim : MonoBehaviour, IFluidSim
             var sqrDst = Vector2.SqrMagnitude(dif);
             if (sqrDst > squaredSmoothingLength) continue;
             
-            var velDif = velocity[i] - velocity[j];
+            // Same conventions as main: velDif = v_j - v_i and a positive
+            // kernel weight (negated spiky derivative), so the force pulls
+            // velocities together. NOTE: this branch originally had BOTH signs
+            // flipped (v_i - v_j against the raw negative derivative), which
+            // cancelled out to correct damping — negating only one of them, as
+            // an earlier "backport" here did, turns viscosity into energy
+            // injection. Sign fixes are relative to local conventions.
+            var velDif = velocity[j] - velocity[i];
             var distance = Mathf.Sqrt(sqrDst);
-            //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
-            // Backported from main: viscosity must pull velocities together
-            // (force ∝ +(v_j - v_i)), so it needs a positive kernel weight; the
-            // spiky derivative is negative inside the radius. Without this,
-            // positive ViscosityFactor amplifies velocity differences and the
-            // fluid explodes (which is what fed NaN into the rigid-body coupling).
             var influence = -SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
             viscosity +=  velDif * mass / density[j] * influence;
         }
