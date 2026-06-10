@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Unity.Profiling;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -72,6 +73,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     InteractionDirection m_InteractionDirection;
     IFluidSim m_FluidSimImplementation;
     float m_TimeAccumulator;
+
+    static readonly ProfilerMarker s_UpdatePerfMarker = new ProfilerMarker("FluidSimGPU.Update");
+    static readonly ProfilerMarker s_SortPerfMarker = new ProfilerMarker("FluidSimGPU.Sort");
+    static readonly ProfilerMarker s_SimKernelsPerfMarker = new ProfilerMarker("FluidSimGPU.SimKernels");
     ParticlePlacementMode m_LastPlacementMode;
     float m_LastFillFraction;
 
@@ -212,6 +217,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     // Update is called once per frame
     void Update()
     {
+        using var markerScope = s_UpdatePerfMarker.Auto();
+
         if (ParticleCount != m_PointDensitiesBuffer.count || PlacementMode != m_LastPlacementMode || !Mathf.Approximately(FillFraction, m_LastFillFraction))
         {
             InitParticleData();
@@ -251,6 +258,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             steps++;
             m_TimeAccumulator -= deltaTime;
 
+            s_SimKernelsPerfMarker.Begin();
             //Predicted Positions
             var kernelIndex0 = SimComputeShader.FindKernel("ComputePredictedPositions");
             SimComputeShader.GetKernelThreadGroupSizes(kernelIndex0, out var xGroupSize, out var yGroupSize, out var zGroupSize);
@@ -270,11 +278,16 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
             SimComputeShader.Dispatch(kernelSpatial0, threadGroupsX, 1, 1);
 
+            s_SimKernelsPerfMarker.End();
+
             //Sort Spatial Acceleration Tables
             //TODO: still dispatches O(log^2 n) merge passes; a shared-memory
             //local sort for blocks that fit in groupshared memory would cut that down.
+            s_SortPerfMarker.Begin();
             ComputeSort(m_SpatialEntryBuffer);
+            s_SortPerfMarker.End();
 
+            s_SimKernelsPerfMarker.Begin();
             //Calculate Spatial Acceleration start index
             var kernelSpatial2 = SimComputeShader.FindKernel("UpdateSpatialLookup_UpdateStartIndices");
             SimComputeShader.GetKernelThreadGroupSizes(kernelSpatial2, out xGroupSize, out yGroupSize, out zGroupSize);
@@ -332,6 +345,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             SimComputeShader.SetBuffer(kernelIndex3, "DebugBuff", m_DebugBuffer);
             threadGroupsX = Mathf.CeilToInt((float)ParticleCount / (int)xGroupSize);
             SimComputeShader.Dispatch(kernelIndex3, threadGroupsX, 1, 1);
+            s_SimKernelsPerfMarker.End();
         }
         // Running behind realtime: drop the surplus so the sim slows down gracefully
         // instead of accumulating an ever-growing debt of steps.
