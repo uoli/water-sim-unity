@@ -38,7 +38,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
     internal GridSpatialLookup m_LookupHelper;
     
     NativeArray<InputSimulationSurfacePoints> m_ExternalPoints;
-    NativeArray<OutputSimulationSurfacePoints> m_ExternalPointsResults;    
+    NativeArray<OutputSimulationSurfacePoints> m_ExternalPointsResults;
+    NativeArray<Vector2> m_ExternalPointPositions;
     NativeArrayToComputeAdapter<Vector2> m_ExternalPointsBuffer;
 
     
@@ -107,6 +108,12 @@ public class FluidSim : MonoBehaviour, IFluidSim
         m_PressureComputeBuffer.Dispose();
         m_VelocitiesComputeBuffer.Dispose();
         m_ExternalPointsBuffer.Dispose();
+        if (m_ExternalPoints.IsCreated)
+            m_ExternalPoints.Dispose();
+        if (m_ExternalPointsResults.IsCreated)
+            m_ExternalPointsResults.Dispose();
+        if (m_ExternalPointPositions.IsCreated)
+            m_ExternalPointPositions.Dispose();
     }
 
     void CleanupSpatialAcceleration()
@@ -143,7 +150,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
         m_DensityComputeBuffer = new NativeArrayToComputeAdapter<float>(m_Density);
         m_PressureComputeBuffer = new NativeArrayToComputeAdapter<float>(m_Pressure);
         m_VelocitiesComputeBuffer = new NativeArrayToComputeAdapter<Vector2>(m_Velocity);
-        
+
+        // Zero-length until a rigid body registers surface points, so every
+        // job can always be scheduled whether or not a body exists.
+        m_ExternalPoints = new NativeArray<InputSimulationSurfacePoints>(0, Allocator.Persistent);
+        m_ExternalPointsResults = new NativeArray<OutputSimulationSurfacePoints>(0, Allocator.Persistent);
     }
     
     void DoReInitializationIfNecessary()
@@ -839,29 +850,38 @@ public class FluidSim : MonoBehaviour, IFluidSim
     //TODO: this only handles a single rigidbody
     public void SetRigidBodySurfaceResults(IList<InputSimulationSurfacePoints> points)
     {
-        var arr = new NativeArray<Vector2>(points.Count, Allocator.Temp);
-
         if (!m_ExternalPoints.IsCreated || m_ExternalPoints.Length < points.Count)
         {
-            m_ExternalPoints.Dispose();
-            m_ExternalPointsResults.Dispose();
+            if (m_ExternalPoints.IsCreated)
+                m_ExternalPoints.Dispose();
+            if (m_ExternalPointsResults.IsCreated)
+                m_ExternalPointsResults.Dispose();
+            if (m_ExternalPointPositions.IsCreated)
+                m_ExternalPointPositions.Dispose();
+            // Release the previous adapter's ComputeBuffer before replacing it.
+            m_ExternalPointsBuffer.Dispose();
+
             m_ExternalPoints = new NativeArray<InputSimulationSurfacePoints>(points.Count, Allocator.Persistent);
             m_ExternalPointsResults = new NativeArray<OutputSimulationSurfacePoints>(points.Count, Allocator.Persistent);
-            m_ExternalPointsBuffer = new NativeArrayToComputeAdapter<Vector2>(arr);
+            m_ExternalPointPositions = new NativeArray<Vector2>(points.Count, Allocator.Persistent);
+            m_ExternalPointsBuffer = new NativeArrayToComputeAdapter<Vector2>(m_ExternalPointPositions);
         }
         for (var i = 0; i < points.Count; i++)
         {
             var point = points[i];
             m_ExternalPoints[i] = point;
-            arr[i] = point.SimSpacePoint;
+            m_ExternalPointPositions[i] = point.SimSpacePoint;
         }
-        m_ExternalPointsBuffer.Update(arr);
+        m_ExternalPointsBuffer.Update(m_ExternalPointPositions);
     }
     public void RetrieveRigidBodySurfaceResults(IList<OutputSimulationSurfacePoints> points)
     {
-        for (var i = 0; i < m_ExternalPointsResults.Length; i++)
+        // The native array only ever grows, so it can be larger than the
+        // caller's list; copy only what the caller asked for.
+        var count = Mathf.Min(m_ExternalPointsResults.Length, points.Count);
+        for (var i = 0; i < count; i++)
         {
-            points[i] = m_ExternalPointsResults[i] ;
+            points[i] = m_ExternalPointsResults[i];
         }
     }
     public ComputeBuffer InputExternalPoints => m_ExternalPointsBuffer.Buffer;
