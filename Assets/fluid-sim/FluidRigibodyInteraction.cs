@@ -18,6 +18,8 @@ public class FluidRigibodyInteraction : MonoBehaviour
     RectTransform m_SimRect;
     OutputSimulationSurfacePoints[] m_SimResults;
     InputSimulationSurfacePoints[] m_SimInput;
+    float[] m_PseudoMasses;
+    Vector4 m_PseudoMassCacheKey = new Vector4(float.NaN, 0, 0, 0);
 
     void OnEnable()
     {
@@ -103,19 +105,43 @@ public class FluidRigibodyInteraction : MonoBehaviour
             };
         }
 
-        ComputePseudoMasses();
+        UpdatePseudoMassesIfNeeded();
+        for (var i = 0; i < m_SimInput.Length; i++)
+            m_SimInput[i].pseudoMass = m_PseudoMasses[i];
+
         m_FluidSim.SetRigidBodySurfaceResults(m_SimInput);
     }
 
-    // Self-calibrating boundary pseudo-mass (Akinci et al. 2012):
-    // psi_b = rho0 / sum_k W(|x_b - x_k|), summed over the boundary samples
-    // themselves (including b). The denominator measures local sample
-    // crowding; its reciprocal is the patch of body volume the sample
-    // represents, so psi is that patch filled at rest density. Sampling the
-    // surface more densely makes each psi proportionally smaller — the wall's
-    // effect on the fluid does not depend on the sampling rate.
-    void ComputePseudoMasses()
+    // Psi depends only on sim-space distances between samples and the kernel
+    // radius. Under rigid motion those distances are invariant as long as the
+    // world->sim scale and the body's scale stay fixed, so the computation is
+    // cached against exactly those invariants. The one case rigid motion does
+    // change them is an anisotropic mapping (different sim-units-per-world in
+    // x and y), where rotating the body skews distances: the key includes the
+    // rotation then, recomputing whenever the body turns.
+    void UpdatePseudoMassesIfNeeded()
     {
+        var rect = m_SimRect.rect;
+        var scaleX = m_FluidSim.Width / rect.width;
+        var scaleY = m_FluidSim.Height / rect.height;
+        var anisotropic = !Mathf.Approximately(scaleX, scaleY);
+        var key = new Vector4(
+            m_FluidSim.SmoothingRadius,
+            scaleX * Rigidbody.transform.lossyScale.x,
+            scaleY * Rigidbody.transform.lossyScale.y,
+            anisotropic ? Rigidbody.rotation : 0f);
+        if (key == m_PseudoMassCacheKey) return;
+        m_PseudoMassCacheKey = key;
+
+        // Self-calibrating boundary pseudo-mass (Akinci et al. 2012):
+        // psi_b = rho0 / sum_k W(|x_b - x_k|), summed over the boundary
+        // samples themselves (including b). The denominator measures local
+        // sample crowding; its reciprocal is the patch of body volume the
+        // sample represents, so psi is that patch filled at rest density.
+        // Sampling the surface more densely makes each psi proportionally
+        // smaller — the wall's effect does not depend on the sampling rate.
+        if (m_PseudoMasses == null || m_PseudoMasses.Length != m_SimInput.Length)
+            m_PseudoMasses = new float[m_SimInput.Length];
         var radius = m_FluidSim.SmoothingRadius;
         var sqrRadius = radius * radius;
         var kernelFactor = SmoothingKernels.CalcSmoothingKernel2Factor(radius);
@@ -130,7 +156,7 @@ public class FluidRigibodyInteraction : MonoBehaviour
                 crowding += SmoothingKernels.SmoothingKernel2(Mathf.Sqrt(sqrDst), radius, kernelFactor);
             }
             // crowding >= W(0) because the sample counts itself; never zero.
-            m_SimInput[i].pseudoMass = m_FluidSim.TargetDensity / crowding;
+            m_PseudoMasses[i] = m_FluidSim.TargetDensity / crowding;
         }
     }
     
