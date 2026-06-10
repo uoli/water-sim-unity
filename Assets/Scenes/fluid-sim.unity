@@ -272,7 +272,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   SimComputeShader: {fileID: 7200000, guid: 47a5eccea77b2bf4ca77adc4d12d562f, type: 3}
   SortComputeShader: {fileID: 7200000, guid: cae7e393630646ab95afb5834be1888b, type: 3}
-  ParticleCount: 20000
+  ParticleCount: 10000
   Width: 100
   Height: 100
   RestDensity: 1
@@ -283,7 +283,7 @@ MonoBehaviour:
   DeltaTime: 0.001
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
-  ExternalForceStrength: 500
+  ExternalForceStrength: 2000
   Gravity: 40
   PlacementMode: 0
   FillFraction: 0.6
@@ -825,17 +825,19 @@ MonoBehaviour:
   width: 100
   height: 100
   Gravity: 9
-  Mass: 1
-  SmoothingLength: 7.1
+  RestDensity: 1
+  SmoothingRadiusInSpacings: 2
   m_PressureMultiplier: 5051.1
   UseAdaptativeStepTime: 0
   SimulationStep: 0.03
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
   AutoStep: 1
+  MaxStepsPerFrame: 8
   ViscosityFactor: -5
   m_InteractionStrength: 100
-  m_TargetDensity: 0.18
+  PlacementMode: 0
+  FillFraction: 0.6
 --- !u!224 &2014640970
 RectTransform:
   m_ObjectHideFlags: 0
