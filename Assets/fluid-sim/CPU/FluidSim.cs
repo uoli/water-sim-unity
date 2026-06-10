@@ -840,7 +840,12 @@ public class FluidSim : MonoBehaviour, IFluidSim
             var velDif = velocity[i] - velocity[j];
             var distance = Mathf.Sqrt(sqrDst);
             //var influence = SmoothingKernelDerivative(distance, sqrDst, squaredSmoothingLength, kernelDerivativeTerm);
-            var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
+            // Backported from main: viscosity must pull velocities together
+            // (force ∝ +(v_j - v_i)), so it needs a positive kernel weight; the
+            // spiky derivative is negative inside the radius. Without this,
+            // positive ViscosityFactor amplifies velocity differences and the
+            // fluid explodes (which is what fed NaN into the rigid-body coupling).
+            var influence = -SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
             viscosity +=  velDif * mass / density[j] * influence;
         }
         particleIndices.Dispose();

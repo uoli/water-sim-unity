@@ -175,6 +175,14 @@ public class FluidRigibodyInteraction : MonoBehaviour
             // mode transfers it exactly, independent of how render frames align
             // with physics steps. No further dt belongs here.
             var worldImpulse = SimToWorldVector(simResult.impulse) * ForceScale;
+            // Never forward non-finite values to the physics engine: if the
+            // fluid blows up (NaN/Infinity), drop the exchange and say why,
+            // instead of corrupting the rigid body and spamming engine errors.
+            if (!float.IsFinite(worldImpulse.x) || !float.IsFinite(worldImpulse.y))
+            {
+                Debug.LogWarning($"Non-finite fluid impulse at surface point {index}; the fluid simulation has likely gone unstable. Skipping.", this);
+                continue;
+            }
             Rigidbody.AddForceAtPosition(worldImpulse, worldPoint, ForceMode2D.Impulse);
         }
     }

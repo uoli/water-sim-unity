@@ -1005,11 +1005,11 @@ MonoBehaviour:
   SmoothingLength: 7.1
   m_PressureMultiplier: 5051.1
   UseAdaptativeStepTime: 0
-  SimulationStep: 0.03
+  SimulationStep: 0.02
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
   AutoStep: 1
-  ViscosityFactor: 5
+  ViscosityFactor: 0.5
   m_InteractionStrength: 100
   m_TargetDensity: 0.18
 --- !u!224 &2014640970
