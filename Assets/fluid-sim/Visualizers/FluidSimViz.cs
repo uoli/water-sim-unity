@@ -43,6 +43,7 @@ public class FluidSimViz : MonoBehaviour
     public Texture2D m_CircleTexture;
     public Shader m_FluidMaterialDebugShader;
     public Shader m_PointInstancedShader;
+    public ComputeShader m_StatsComputeShader;
     public MeshRenderer m_FluidMeshRenderer;
     public bool m_UseDynamicRanges = false;
     public float m_CircleSize = 10;
@@ -77,12 +78,26 @@ public class FluidSimViz : MonoBehaviour
     ComputeBuffer m_PointPressureBuffer;
     ComputeBuffer m_PointVelocityBuffer;
 
+    // Matches the FluidStats struct in FluidStats.compute.
+    struct FluidStatsGPU
+    {
+        public float maxDensity;
+        public float minPressure;
+        public float maxPressure;
+        public float minVelocitySq;
+        public float maxVelocitySq;
+        public float velocitySqSum;
+    }
+
+    const int k_StatsGroupSize = 256;
+    const int k_StatsGroupCount = 64;
+
     float m_KineticEnergy = 0;
     VisualizationRanges m_CachedDynamicRanges;
     bool m_StatsRequestInFlight;
-    AsyncGPUReadbackRequest m_DensityRequest;
-    AsyncGPUReadbackRequest m_PressureRequest;
-    AsyncGPUReadbackRequest m_VelocityRequest;
+    AsyncGPUReadbackRequest m_StatsRequest;
+    ComputeBuffer m_StatsPartialsBuffer;
+    ComputeBuffer m_StatsResultBuffer;
     GUIContent energyContent = new GUIContent();
     Vector3[] m_FourCornersWorldSpace = new Vector3[4];
     Vector3[] m_FourCornersScreenSpace = new Vector3[4];
@@ -106,11 +121,19 @@ public class FluidSimViz : MonoBehaviour
         m_PointInstancedMaterial = new Material(m_PointInstancedShader);
         m_FluidMaterialDebugViz = new Material(m_FluidMaterialDebugShader);
         m_FluidMeshRenderer.material = m_FluidMaterialDebugViz;
+        var statsStride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(FluidStatsGPU));
+        m_StatsPartialsBuffer = new ComputeBuffer(k_StatsGroupCount, statsStride);
+        m_StatsPartialsBuffer.name = "FluidStatsPartialsBuffer";
+        m_StatsResultBuffer = new ComputeBuffer(1, statsStride);
+        m_StatsResultBuffer.name = "FluidStatsResultBuffer";
         InitializePointInstancedRender();
     }
 
     void OnDisable()
     {
+        m_StatsPartialsBuffer?.Release();
+        m_StatsResultBuffer?.Release();
+        m_StatsRequestInFlight = false;
         CleanupPointInstancedRender();
         m_FluidMeshRenderer.material = null;
         Destroy(m_FluidMaterialDebugViz);
@@ -189,77 +212,54 @@ public class FluidSimViz : MonoBehaviour
         }
     }
 
-    // The ranges only normalize the visualization, so they tolerate a few
-    // frames of latency. Asynchronous readback avoids the synchronous GetData
-    // stall, which drains the whole queued GPU pipeline (all substeps of the
-    // sim) before returning and dominates frame time.
+    // The min/max/sum reduction runs on the GPU (FluidStats.compute), so only
+    // a single small struct is ever read back, asynchronously. The ranges only
+    // normalize the visualization, so the few frames of readback latency are
+    // invisible; a synchronous readback here would drain the whole queued GPU
+    // pipeline (all sim substeps of the frame) and dominate frame time.
     VisualizationRanges CalculateStats()
     {
-        if (m_StatsRequestInFlight && m_DensityRequest.done && m_PressureRequest.done && m_VelocityRequest.done)
+        if (m_StatsComputeShader == null)
+            return m_CachedDynamicRanges;
+
+        if (m_StatsRequestInFlight && m_StatsRequest.done)
         {
             m_StatsRequestInFlight = false;
-            if (!m_DensityRequest.hasError && !m_PressureRequest.hasError && !m_VelocityRequest.hasError)
+            if (!m_StatsRequest.hasError)
             {
-                ComputeStats(m_DensityRequest.GetData<float>(),
-                    m_PressureRequest.GetData<float>(),
-                    m_VelocityRequest.GetData<Vector2>());
+                var stats = m_StatsRequest.GetData<FluidStatsGPU>()[0];
+                m_KineticEnergy = 0.5f * m_FluidSim.Mass * stats.velocitySqSum;
+                m_CachedDynamicRanges = new VisualizationRanges
+                {
+                    maxDensity = stats.maxDensity,
+                    minPressure = stats.minPressure,
+                    maxPressure = stats.maxPressure,
+                    minVelocity = Mathf.Sqrt(Mathf.Max(0f, stats.minVelocitySq)),
+                    maxVelocity = Mathf.Sqrt(Mathf.Max(1f, stats.maxVelocitySq)),
+                };
             }
         }
 
         if (!m_StatsRequestInFlight)
         {
-            m_DensityRequest = AsyncGPUReadback.Request(m_FluidSim.GetDensities());
-            m_PressureRequest = AsyncGPUReadback.Request(m_FluidSim.GetPressures());
-            m_VelocityRequest = AsyncGPUReadback.Request(m_FluidSim.GetVelocities());
+            var reduceKernel = m_StatsComputeShader.FindKernel("ReduceStats");
+            var finalKernel = m_StatsComputeShader.FindKernel("ReduceStatsFinal");
+            m_StatsComputeShader.SetInt("ParticleCount", m_FluidSim.ParticleCount);
+            m_StatsComputeShader.SetInt("GroupCount", k_StatsGroupCount);
+            m_StatsComputeShader.SetBuffer(reduceKernel, "Densities", m_PointDensitiesBuffer);
+            m_StatsComputeShader.SetBuffer(reduceKernel, "Pressures", m_PointPressureBuffer);
+            m_StatsComputeShader.SetBuffer(reduceKernel, "Velocities", m_PointVelocityBuffer);
+            m_StatsComputeShader.SetBuffer(reduceKernel, "Partials", m_StatsPartialsBuffer);
+            m_StatsComputeShader.Dispatch(reduceKernel, k_StatsGroupCount, 1, 1);
+            m_StatsComputeShader.SetBuffer(finalKernel, "Partials", m_StatsPartialsBuffer);
+            m_StatsComputeShader.SetBuffer(finalKernel, "Result", m_StatsResultBuffer);
+            m_StatsComputeShader.Dispatch(finalKernel, 1, 1, 1);
+
+            m_StatsRequest = AsyncGPUReadback.Request(m_StatsResultBuffer);
             m_StatsRequestInFlight = true;
         }
 
         return m_CachedDynamicRanges;
-    }
-
-    void ComputeStats(NativeArray<float> densities, NativeArray<float> pressures, NativeArray<Vector2> velocities)
-    {
-        if (densities.Length == 0 || pressures.Length == 0)
-            return;
-
-        var maxDensity = 0f;
-        for (var index = 0; index < densities.Length; index++)
-        {
-            if (densities[index] > maxDensity)
-                maxDensity = densities[index];
-        }
-
-        var maxPressure = pressures[0];
-        var minPressure = pressures[0];
-        for (var index = 0; index < pressures.Length; index++)
-        {
-            if(pressures[index] > maxPressure)
-                maxPressure = pressures[index];
-            if (pressures[index] < minPressure)
-                minPressure = pressures[index];
-        }
-
-        m_KineticEnergy = 0;
-        var minVelocity = 0f;
-        var maxVelocity = 1f;
-        for (var index = 0; index < velocities.Length; index++)
-        {
-            var velocity = velocities[index];
-            m_KineticEnergy += 0.5f * m_FluidSim.Mass * Vector2.Dot(velocity, velocity);
-            minVelocity = Mathf.Min(velocity.sqrMagnitude, minVelocity);
-            maxVelocity = Mathf.Max(velocity.sqrMagnitude, maxVelocity);
-        }
-        minVelocity = Mathf.Sqrt(minVelocity);
-        maxVelocity = Mathf.Sqrt(maxVelocity);
-
-        m_CachedDynamicRanges = new VisualizationRanges
-        {
-            minPressure = minPressure,
-            maxDensity = maxDensity,
-            maxVelocity = maxVelocity,
-            minVelocity = minVelocity,
-            maxPressure = maxPressure
-        };
     }
     
     Vector2 CalcMouseInSimulationSpace()

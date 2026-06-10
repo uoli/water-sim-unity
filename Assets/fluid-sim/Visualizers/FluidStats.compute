@@ -1,0 +1,100 @@
+// Reduces the per-particle buffers to a handful of statistics on the GPU so
+// the visualization only ever reads back a single tiny struct instead of the
+// full particle data.
+#pragma kernel ReduceStats
+#pragma kernel ReduceStatsFinal
+
+#define GROUP_SIZE 256
+#define FLT_MAX 3.402823466e+38
+
+StructuredBuffer<float> Densities;
+StructuredBuffer<float> Pressures;
+StructuredBuffer<float2> Velocities;
+
+struct FluidStats
+{
+    float maxDensity;
+    float minPressure;
+    float maxPressure;
+    float minVelocitySq;
+    float maxVelocitySq;
+    float velocitySqSum;
+};
+
+RWStructuredBuffer<FluidStats> Partials;
+RWStructuredBuffer<FluidStats> Result;
+int ParticleCount;
+int GroupCount;    // groups dispatched for ReduceStats == entries in Partials
+
+groupshared FluidStats gs_Stats[GROUP_SIZE];
+
+FluidStats IdentityStats()
+{
+    FluidStats r;
+    r.maxDensity = 0;
+    r.minPressure = FLT_MAX;
+    r.maxPressure = -FLT_MAX;
+    r.minVelocitySq = FLT_MAX;
+    r.maxVelocitySq = 0;
+    r.velocitySqSum = 0;
+    return r;
+}
+
+FluidStats CombineStats(FluidStats a, FluidStats b)
+{
+    FluidStats r;
+    r.maxDensity = max(a.maxDensity, b.maxDensity);
+    r.minPressure = min(a.minPressure, b.minPressure);
+    r.maxPressure = max(a.maxPressure, b.maxPressure);
+    r.minVelocitySq = min(a.minVelocitySq, b.minVelocitySq);
+    r.maxVelocitySq = max(a.maxVelocitySq, b.maxVelocitySq);
+    r.velocitySqSum = a.velocitySqSum + b.velocitySqSum;
+    return r;
+}
+
+void ReduceGroupShared(uint groupIndex)
+{
+    GroupMemoryBarrierWithGroupSync();
+    for (uint offset = GROUP_SIZE / 2; offset > 0; offset >>= 1)
+    {
+        if (groupIndex < offset)
+            gs_Stats[groupIndex] = CombineStats(gs_Stats[groupIndex], gs_Stats[groupIndex + offset]);
+        GroupMemoryBarrierWithGroupSync();
+    }
+}
+
+[numthreads(GROUP_SIZE, 1, 1)]
+void ReduceStats(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex, uint3 id : SV_DispatchThreadID)
+{
+    FluidStats acc = IdentityStats();
+    // Grid-stride loop: a fixed number of groups covers any particle count.
+    for (uint i = id.x; i < (uint)ParticleCount; i += GROUP_SIZE * GroupCount)
+    {
+        FluidStats s;
+        s.maxDensity = Densities[i];
+        s.minPressure = Pressures[i];
+        s.maxPressure = s.minPressure;
+        float2 v = Velocities[i];
+        float vsq = dot(v, v);
+        s.minVelocitySq = vsq;
+        s.maxVelocitySq = vsq;
+        s.velocitySqSum = vsq;
+        acc = CombineStats(acc, s);
+    }
+    gs_Stats[groupIndex] = acc;
+    ReduceGroupShared(groupIndex);
+    if (groupIndex == 0)
+        Partials[groupId.x] = gs_Stats[0];
+}
+
+[numthreads(GROUP_SIZE, 1, 1)]
+void ReduceStatsFinal(uint groupIndex : SV_GroupIndex)
+{
+    FluidStats acc = IdentityStats();
+    for (uint i = groupIndex; i < (uint)GroupCount; i += GROUP_SIZE)
+        acc = CombineStats(acc, Partials[i]);
+    gs_Stats[groupIndex] = acc;
+    ReduceGroupShared(groupIndex);
+    if (groupIndex == 0)
+        Result[0] = gs_Stats[0];
+}

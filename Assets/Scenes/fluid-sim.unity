@@ -323,6 +323,7 @@ MonoBehaviour:
   m_CircleTexture: {fileID: 2800000, guid: 810fda614b13807479b5eae6ca3a5273, type: 3}
   m_FluidMaterialDebugShader: {fileID: 4800000, guid: bea36adff31bbfd4fb4c9ee3ec899281, type: 3}
   m_PointInstancedShader: {fileID: 4800000, guid: fcfb3d4be45b3da4da15d3c3c11f6d24, type: 3}
+  m_StatsComputeShader: {fileID: 7200000, guid: 8c1f3a59d27e46b1a90f5c4d83e2b7a6, type: 3}
   m_FluidMeshRenderer: {fileID: 1280098595}
   m_UseDynamicRanges: 1
   m_CircleSize: 0.5
@@ -789,6 +790,7 @@ MonoBehaviour:
   m_CircleTexture: {fileID: 2800000, guid: 810fda614b13807479b5eae6ca3a5273, type: 3}
   m_FluidMaterialDebugShader: {fileID: 4800000, guid: bea36adff31bbfd4fb4c9ee3ec899281, type: 3}
   m_PointInstancedShader: {fileID: 4800000, guid: fcfb3d4be45b3da4da15d3c3c11f6d24, type: 3}
+  m_StatsComputeShader: {fileID: 7200000, guid: 8c1f3a59d27e46b1a90f5c4d83e2b7a6, type: 3}
   m_FluidMeshRenderer: {fileID: 1963848823}
   m_UseDynamicRanges: 1
   m_CircleSize: 1
