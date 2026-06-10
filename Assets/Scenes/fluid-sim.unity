@@ -837,7 +837,7 @@ MonoBehaviour:
   CollisionDamping: 0.5
   AutoStep: 1
   MaxStepsPerFrame: 8
-  ViscosityFactor: -5
+  ViscosityFactor: 1
   m_InteractionStrength: 100
   PlacementMode: 0
   FillFraction: 0.6
