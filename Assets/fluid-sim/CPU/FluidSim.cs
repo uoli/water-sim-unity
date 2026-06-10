@@ -243,9 +243,11 @@ public class FluidSim : MonoBehaviour, IFluidSim
         [ReadOnly]
         public NativeArray<OutputSimulationSurfacePoints> outputSurfacePoints;
         [ReadOnly]
-        public GridSpatialLookup lookupHelper;
+        public NativeArray<float> densities;
         public float squaredSmoothingLength;
         public float smoothingLength;
+        public float precalculatedKernelFactor;
+        public float mass;
 
         public float deltaTime;
         public float gravity;
@@ -263,52 +265,42 @@ public class FluidSim : MonoBehaviour, IFluidSim
             if (forceRadius > 0)
                 interactionForce = InteractionForce(position, velocity, forceCenter, forceRadius, forceStrength);
 
-            var forceFromRigidBody = RigidBodyForce(position, lookupHelper, smoothingLength,
-                squaredSmoothingLength, positions, rigidBodyPoints, outputSurfacePoints);
-            
-            velocities[index] += (Vector2.down * gravity + interactionForce + forceFromRigidBody) * deltaTime;
+            var reactionVelocityChange = ReactionVelocityChangeFromRigidBody(position, densities[index],
+                mass, squaredSmoothingLength, smoothingLength, precalculatedKernelFactor,
+                rigidBodyPoints, outputSurfacePoints);
+
+            // The reaction is an impulse-derived velocity change, not a force:
+            // it must not be scaled by deltaTime again.
+            velocities[index] += (Vector2.down * gravity + interactionForce) * deltaTime + reactionVelocityChange;
         }
 
-        static Vector2 RigidBodyForce(Vector2 particlePosition, GridSpatialLookup lookup,
-            float smoothingLength, float squaredSmoothingLength,
-            NativeArray<Vector2> positions,
-            NativeArray<InputSimulationSurfacePoints> rigidBodyPoints, NativeArray<OutputSimulationSurfacePoints> outputSimulationSurfacePoints)
+        // Newton's third law. Each surface point received an impulse interpolated
+        // from nearby particles with weights w = (m/rho) * W, normalized by the
+        // weight sum stored alongside it. Give every particle back the equal and
+        // opposite share of that impulse: the shares w/weightSum sum to 1 over
+        // the contributing particles, so the momentum handed to the fluid is
+        // exactly the negative of what the body received. Conservation holds by
+        // bookkeeping; no tuning constant.
+        static Vector2 ReactionVelocityChangeFromRigidBody(Vector2 particlePosition, float particleDensity,
+            float mass, float squaredSmoothingLength, float smoothingLength, float kernelFactor,
+            NativeArray<InputSimulationSurfacePoints> rigidBodyPoints,
+            NativeArray<OutputSimulationSurfacePoints> surfacePointImpulses)
         {
-            var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
-            lookup.GetParticlesAround(particlePosition, particleIndices);
-            
-            var totalKernelWeight = 0f;
-            var reactionForce = Vector2.zero;
+            var velocityChange = Vector2.zero;
             for (var i = 0; i < rigidBodyPoints.Length; i++)
             {
-                var p = rigidBodyPoints[i];
-                var f = outputSimulationSurfacePoints[i];
-                
-                foreach(var j in particleIndices)
-                {
-                    var dif = positions[j] - p.SimSpacePoint; 
-                    var sqrDst = Vector2.SqrMagnitude(dif);
-                    if (sqrDst > squaredSmoothingLength) continue;
-        
-                    var distance = Mathf.Sqrt(sqrDst);
-                    var kernelWeight = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
-                    totalKernelWeight += kernelWeight;
-                }
+                var output = surfacePointImpulses[i];
+                if (output.weightSum <= 1e-6f) continue;
 
-                {
-                    var dif = particlePosition - p.SimSpacePoint;
-                    var sqrDst = Vector2.SqrMagnitude(dif);
-                    if (sqrDst > squaredSmoothingLength) continue;
+                var dif = particlePosition - rigidBodyPoints[i].SimSpacePoint;
+                var sqrDst = dif.sqrMagnitude;
+                if (sqrDst > squaredSmoothingLength) continue;
 
-                    var dir = dif.normalized;
-                    var distance = Mathf.Sqrt(sqrDst);
-                    var influence = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
-
-                    reactionForce += -f.impulse * (influence / totalKernelWeight) * 300;
-                }
+                var w = mass / particleDensity * SmoothingKernels.SmoothingKernel2(Mathf.Sqrt(sqrDst), smoothingLength, kernelFactor);
+                var share = w / output.weightSum;
+                velocityChange += -output.impulse * share / mass;
             }
-            particleIndices.Dispose();
-            return reactionForce;
+            return velocityChange;
         }
         
         static Vector2 InteractionForce(Vector2 particlePosition, Vector2 particleVelocity, Vector2 forceCenter, float radius, float strength)
@@ -475,14 +467,15 @@ public class FluidSim : MonoBehaviour, IFluidSim
             var fluidForce = CalculateFluidForceAtSurfacePoint(
                 surfacePoint.SimSpacePoint, surfacePoint.normal, surfacePoint.velocity, lookupHelper,
                 mass, squaredSmoothingLength, smoothingLength, precalculatedKernelFactor, viscosityCoefficient,
-                positions, pressures, densities, velocities);
+                positions, pressures, densities, velocities, out var weightSum);
             // Integrating the force over this step's dt up front makes the
             // output an impulse: the consumer no longer needs to know (or
             // guess) which timestep the simulation used.
             var impulse = fluidForce * surfacePoint.areaWeight * deltaTime;
             outputSurfacePoints[index] = new OutputSimulationSurfacePoints
             {
-                impulse = impulse
+                impulse = impulse,
+                weightSum = weightSum
             };
         }
     }
@@ -552,7 +545,9 @@ public class FluidSim : MonoBehaviour, IFluidSim
             velocities = m_Velocity,
             rigidBodyPoints = m_ExternalPoints,
             outputSurfacePoints = m_ExternalPointsResults,
-            lookupHelper = m_LookupHelper,
+            densities = m_Density,
+            mass = Mass,
+            precalculatedKernelFactor = m_KernelTerm,
             squaredSmoothingLength = m_SquaredSmoothingLength,
             smoothingLength = SmoothingLength,
             gravity = Gravity,
@@ -736,11 +731,12 @@ public class FluidSim : MonoBehaviour, IFluidSim
     static Vector2 CalculateFluidForceAtSurfacePoint(Vector2 position, Vector2 normal, Vector2 surfaceVelocity,
         GridSpatialLookup lookup, float mass,
         float squaredSmoothingLength, float smoothingLength, float kernelFactor, float dragCoefficient,
-        ReadOnlySpan<Vector2> positions, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density, ReadOnlySpan<Vector2> velocities)
+        ReadOnlySpan<Vector2> positions, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density, ReadOnlySpan<Vector2> velocities,
+        out float weightSum)
     {
         var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
         lookup.GetParticlesAround(position, particleIndices);
-        var weightSum = 0f;
+        weightSum = 0f;
         var pressureSum = 0f;
         var velocitySum = Vector2.zero;
         foreach(var j in particleIndices)

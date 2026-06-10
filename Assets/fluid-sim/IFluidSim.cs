@@ -20,6 +20,9 @@ public struct OutputSimulationSurfacePoints
     // Momentum exchanged with the fluid during the sim step (the surface force
     // already integrated over the step's dt) — apply with ForceMode2D.Impulse.
     public Vector2 impulse;
+    // Shepard weight sum of the interpolation that produced the impulse; the
+    // back-reaction uses it to return each particle its exact share.
+    public float weightSum;
 }
 
 
