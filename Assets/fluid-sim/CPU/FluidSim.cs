@@ -248,6 +248,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
         public float smoothingLength;
         public float precalculatedKernelFactor;
         public float mass;
+        public float contactDistance;
 
         public float deltaTime;
         public float gravity;
@@ -271,7 +272,29 @@ public class FluidSim : MonoBehaviour, IFluidSim
 
             // The reaction is an impulse-derived velocity change, not a force:
             // it must not be scaled by deltaTime again.
-            velocities[index] += (Vector2.down * gravity + interactionForce) * deltaTime + reactionVelocityChange;
+            var newVelocity = velocity + (Vector2.down * gravity + interactionForce) * deltaTime + reactionVelocityChange;
+            newVelocity = CancelVelocityIntoSurface(position, newVelocity, contactDistance, rigidBodyPoints);
+            velocities[index] = newVelocity;
+        }
+
+        // Last line of defense against tunneling: the boundary-density barrier
+        // is soft, so a fast particle can still cross the hull within one
+        // step. Within contact distance of a sample, remove the velocity
+        // component moving into the surface, keeping tangential motion (free
+        // slip) — the body-surface analog of the wall bounce.
+        static Vector2 CancelVelocityIntoSurface(Vector2 particlePosition, Vector2 velocity, float contactDistance,
+            NativeArray<InputSimulationSurfacePoints> rigidBodyPoints)
+        {
+            var sqrContact = contactDistance * contactDistance;
+            for (var i = 0; i < rigidBodyPoints.Length; i++)
+            {
+                var p = rigidBodyPoints[i];
+                if (Vector2.SqrMagnitude(particlePosition - p.SimSpacePoint) > sqrContact) continue;
+                var relativeNormalSpeed = Vector2.Dot(velocity - p.velocity, p.normal);
+                if (relativeNormalSpeed < 0)
+                    velocity -= relativeNormalSpeed * p.normal;
+            }
+            return velocity;
         }
 
         // Newton's third law. Each surface point received an impulse interpolated
@@ -550,6 +573,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             precalculatedKernelFactor = m_KernelTerm,
             squaredSmoothingLength = m_SquaredSmoothingLength,
             smoothingLength = SmoothingLength,
+            contactDistance = SmoothingLength * 0.25f,
             gravity = Gravity,
             deltaTime = deltaTime,
             forceCenter = m_MousePosition,
@@ -607,11 +631,12 @@ public class FluidSim : MonoBehaviour, IFluidSim
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static float CalculateDensity(Vector2 pos, GridSpatialLookup lookup, float mass, float squaredSmoothingLength, float smoothingLength, float precalculatedKernelFactor, ReadOnlySpan<Vector2> positions)
+    static float CalculateDensity(Vector2 pos, GridSpatialLookup lookup, float mass, float squaredSmoothingLength, float smoothingLength, float precalculatedKernelFactor, ReadOnlySpan<Vector2> positions,
+        ReadOnlySpan<InputSimulationSurfacePoints> boundaryPoints)
     {
         var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
         lookup.GetParticlesAround(pos, particleIndices);
-        
+
         var density = 0f;
         //for (var i = 0; i < positions.Length; i++)
         foreach(var i in particleIndices)
@@ -624,6 +649,18 @@ public class FluidSim : MonoBehaviour, IFluidSim
             density += mass * influence;
         }
         particleIndices.Dispose();
+
+        // The rigid body's surface samples contribute their pseudo-mass exactly
+        // like fluid neighbors. A particle approaching the hull reads rising
+        // density instead of a void, so the standard pressure repulsion keeps
+        // fluid out of the body, and pressure sampled at the hull becomes
+        // hydrostatically correct (real buoyancy magnitudes).
+        for (var b = 0; b < boundaryPoints.Length; b++)
+        {
+            var sqrDst = Vector2.SqrMagnitude(boundaryPoints[b].SimSpacePoint - pos);
+            if (sqrDst > squaredSmoothingLength) continue;
+            density += boundaryPoints[b].pseudoMass * SmoothingKernels.SmoothingKernel2(Mathf.Sqrt(sqrDst), smoothingLength, precalculatedKernelFactor);
+        }
         return density;
     }
 
@@ -634,16 +671,19 @@ public class FluidSim : MonoBehaviour, IFluidSim
         public NativeArray<Vector2> positions;
         [ReadOnly]
         public GridSpatialLookup lookupHelper;
+        [ReadOnly]
+        public NativeArray<InputSimulationSurfacePoints> rigidBodyPoints;
         public NativeArray<float> density;
 
         public float mass;
         public float squaredSmoothingLength;
         public float smoothingLength;
-        public float precalculatedKernelFactor; 
-        
+        public float precalculatedKernelFactor;
+
         public void Execute(int index)
         {
-            density[index] = CalculateDensity(positions[index], lookupHelper, mass, squaredSmoothingLength, smoothingLength, precalculatedKernelFactor, positions.AsReadOnlySpan());
+            density[index] = CalculateDensity(positions[index], lookupHelper, mass, squaredSmoothingLength, smoothingLength, precalculatedKernelFactor, positions.AsReadOnlySpan(),
+                rigidBodyPoints.AsReadOnlySpan());
         }
     }
 
@@ -656,6 +696,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
         {
             positions = m_PredictedPosition,
             lookupHelper = m_LookupHelper,
+            rigidBodyPoints = m_ExternalPoints,
             mass = Mass,
             squaredSmoothingLength = m_SquaredSmoothingLength,
             smoothingLength = SmoothingLength,
@@ -687,8 +728,14 @@ public class FluidSim : MonoBehaviour, IFluidSim
 
         for (var index = 0; index < m_ParticleCount; index++)
         {
+            // Clamp to non-negative (backported from main): below-target
+            // density would otherwise produce attractive pressure. For the
+            // rigid body this matters doubly — negative pressure near the hull
+            // reads as suction pulling fluid and body together, and the
+            // boundary-density barrier only works if pressure rises with
+            // proximity rather than oscillating around zero.
             var densityError = m_Density[index] - m_TargetDensity;
-            var pressure = densityError * m_PressureMultiplier;
+            var pressure = Mathf.Max(0, densityError * m_PressureMultiplier);
             m_Pressure[index] = pressure;
         }
     }

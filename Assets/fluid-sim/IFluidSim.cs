@@ -14,6 +14,10 @@ public struct InputSimulationSurfacePoints
     public Vector2 normal;
     public Vector2 velocity;
     public float areaWeight;
+    // Akinci-style boundary pseudo-mass: the patch of body volume this sample
+    // represents, filled at the fluid's rest density. Contributes to fluid
+    // density so the body excludes volume.
+    public float pseudoMass;
 }
 public struct OutputSimulationSurfacePoints
 {

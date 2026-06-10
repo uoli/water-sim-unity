@@ -102,7 +102,36 @@ public class FluidRigibodyInteraction : MonoBehaviour
                 areaWeight = areaWeight
             };
         }
+
+        ComputePseudoMasses();
         m_FluidSim.SetRigidBodySurfaceResults(m_SimInput);
+    }
+
+    // Self-calibrating boundary pseudo-mass (Akinci et al. 2012):
+    // psi_b = rho0 / sum_k W(|x_b - x_k|), summed over the boundary samples
+    // themselves (including b). The denominator measures local sample
+    // crowding; its reciprocal is the patch of body volume the sample
+    // represents, so psi is that patch filled at rest density. Sampling the
+    // surface more densely makes each psi proportionally smaller — the wall's
+    // effect on the fluid does not depend on the sampling rate.
+    void ComputePseudoMasses()
+    {
+        var radius = m_FluidSim.SmoothingRadius;
+        var sqrRadius = radius * radius;
+        var kernelFactor = SmoothingKernels.CalcSmoothingKernel2Factor(radius);
+        for (var i = 0; i < m_SimInput.Length; i++)
+        {
+            var selfPosition = m_SimInput[i].SimSpacePoint;
+            var crowding = 0f;
+            for (var k = 0; k < m_SimInput.Length; k++)
+            {
+                var sqrDst = (m_SimInput[k].SimSpacePoint - selfPosition).sqrMagnitude;
+                if (sqrDst > sqrRadius) continue;
+                crowding += SmoothingKernels.SmoothingKernel2(Mathf.Sqrt(sqrDst), radius, kernelFactor);
+            }
+            // crowding >= W(0) because the sample counts itself; never zero.
+            m_SimInput[i].pseudoMass = m_FluidSim.TargetDensity / crowding;
+        }
     }
     
     void PostSimulation()
