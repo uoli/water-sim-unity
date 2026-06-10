@@ -33,6 +33,10 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public float ViscosityFactor = 0.5f;
     public float m_InteractionStrength;
     public ParticlePlacementMode PlacementMode = ParticlePlacementMode.GridWithJitter;
+    // Fraction of the box (from the bottom) the fluid occupies at rest. Below 1
+    // there is a free surface, so the fluid can slosh and splash.
+    [Range(0.1f, 1f)]
+    public float FillFraction = 0.6f;
 
     
     NativeArray<Vector2> m_Position;
@@ -49,6 +53,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     float m_LastStepMaxVelocity;
     float m_TimeAccumulator;
     ParticlePlacementMode m_LastPlacementMode;
+    float m_LastFillFraction;
     Vector2 m_MousePosition;
     float m_MouseRadius;
     InteractionDirection m_InteractionDirection;
@@ -75,8 +80,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
     float IFluidSim.TargetDensity => RestDensity;
 
     // Derived quantities: the spacing comes from how many particles fill the
-    // box, and mass follows so that a uniform fill sits exactly at RestDensity.
-    public float ParticleSpacing => Mathf.Sqrt(width * height / (float)Mathf.Max(1, m_ParticleCount));
+    // spawn region, and mass follows so that the fill sits exactly at RestDensity.
+    public float ParticleSpacing => Mathf.Sqrt(width * height * FillFraction / Mathf.Max(1, m_ParticleCount));
     public float Mass => RestDensity * ParticleSpacing * ParticleSpacing;
     public float SmoothingLength => SmoothingRadiusInSpacings * ParticleSpacing;
 
@@ -135,9 +140,10 @@ public class FluidSim : MonoBehaviour, IFluidSim
         m_Velocity = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
         m_ViscosityVelocityDelta = new NativeArray<Vector2>(m_ParticleCount, Allocator.Persistent);
         m_LastPlacementMode = PlacementMode;
+        m_LastFillFraction = FillFraction;
         for ( var i = 0; i < m_ParticleCount; i++ )
         {
-            var position = ParticlePlacement.GetPosition(PlacementMode, i, m_ParticleCount, width, height);
+            var position = ParticlePlacement.GetPosition(PlacementMode, i, m_ParticleCount, width, height * FillFraction);
             m_Position[i] = position;
             m_PredictedPosition[i] = position;
             m_Density[i] = 0;
@@ -156,7 +162,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     {
         var particleCountDifferent = m_ParticleCount != m_Position.Length;
         var smoothingRadiusDifferent = !m_LookupHelper.IsValid || !Mathf.Approximately(SmoothingLength, m_LookupHelper.CellSize);
-        if (particleCountDifferent || PlacementMode != m_LastPlacementMode)
+        if (particleCountDifferent || PlacementMode != m_LastPlacementMode || !Mathf.Approximately(FillFraction, m_LastFillFraction))
         {
             InitParticles();
         }

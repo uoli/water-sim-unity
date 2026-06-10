@@ -277,7 +277,7 @@ MonoBehaviour:
   Height: 100
   RestDensity: 1
   SmoothingRadiusInSpacings: 2
-  PressureMultiplier: 100000
+  PressureMultiplier: 60000
   MaxStepsPerFrame: 20
   DeltaTime: 0.001
   BoundaryPushStrength: 0
@@ -285,6 +285,7 @@ MonoBehaviour:
   ExternalForceStrength: 500
   Gravity: 40
   PlacementMode: 0
+  FillFraction: 0.6
 --- !u!224 &367632488
 RectTransform:
   m_ObjectHideFlags: 0

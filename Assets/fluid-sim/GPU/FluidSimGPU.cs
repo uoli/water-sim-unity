@@ -37,6 +37,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public float ExternalForceStrength = 10f;
     public float Gravity = 9.8f;
     public ParticlePlacementMode PlacementMode = ParticlePlacementMode.GridWithJitter;
+    // Fraction of the box (from the bottom) the fluid occupies at rest. Below 1
+    // there is a free surface, so the fluid can slosh and splash.
+    [Range(0.1f, 1f)]
+    public float FillFraction = 0.6f;
     
     Vector2[] m_PointPositionData;
     float[] m_PointDensitiesData;
@@ -65,14 +69,15 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     IFluidSim m_FluidSimImplementation;
     float m_TimeAccumulator;
     ParticlePlacementMode m_LastPlacementMode;
+    float m_LastFillFraction;
 
     int IFluidSim.ParticleCount => ParticleCount;
     int IFluidSim.Height => Height;
     int IFluidSim.Width => Width;
 
     // Derived quantities: the spacing comes from how many particles fill the
-    // box, and mass follows so that a uniform fill sits exactly at RestDensity.
-    public float ParticleSpacing => Mathf.Sqrt(Width * Height / (float)Mathf.Max(1, ParticleCount));
+    // spawn region, and mass follows so that the fill sits exactly at RestDensity.
+    public float ParticleSpacing => Mathf.Sqrt(Width * Height * FillFraction / Mathf.Max(1, ParticleCount));
     public float Mass => RestDensity * ParticleSpacing * ParticleSpacing;
     public float SmoothingRadius => SmoothingRadiusInSpacings * ParticleSpacing;
     public float TargetDensity => RestDensity;
@@ -107,9 +112,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_PredictedPositionData = new Vector2[ParticleCount];
 
         m_LastPlacementMode = PlacementMode;
+        m_LastFillFraction = FillFraction;
         for ( var i = 0; i < ParticleCount; i++ )
         {
-            var position = ParticlePlacement.GetPosition(PlacementMode, i, ParticleCount, Width, Height);
+            var position = ParticlePlacement.GetPosition(PlacementMode, i, ParticleCount, Width, Height * FillFraction);
 
             m_PointPositionData[i] = position;
             m_PointDensitiesData[i] = 0;
@@ -184,7 +190,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     // Update is called once per frame
     void Update()
     {
-        if (ParticleCount != m_PointDensitiesBuffer.count || PlacementMode != m_LastPlacementMode)
+        if (ParticleCount != m_PointDensitiesBuffer.count || PlacementMode != m_LastPlacementMode || !Mathf.Approximately(FillFraction, m_LastFillFraction))
         {
             InitParticleData();
         }
