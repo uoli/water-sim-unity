@@ -464,22 +464,22 @@ public class FluidSim : MonoBehaviour, IFluidSim
         public float mass;
         public float squaredSmoothingLength;
         public float smoothingLength;
-        public float kernelDerivativeTerm;
+        public float precalculatedKernelFactor;
         public float deltaTime;
         public float viscosityCoefficient;
 
         public void Execute(int index)
         {
-            var surfacePoint = rigidBodyPoints[index]; 
+            var surfacePoint = rigidBodyPoints[index];
 
-            var pressureForce = CalculatePressureAndViscosityForRigidObject(
-                surfacePoint.SimSpacePoint, surfacePoint.velocity, lookupHelper,
-                mass, squaredSmoothingLength, smoothingLength, kernelDerivativeTerm, viscosityCoefficient,
+            var fluidForce = CalculateFluidForceAtSurfacePoint(
+                surfacePoint.SimSpacePoint, surfacePoint.normal, surfacePoint.velocity, lookupHelper,
+                mass, squaredSmoothingLength, smoothingLength, precalculatedKernelFactor, viscosityCoefficient,
                 positions, pressures, densities, velocities);
             // Integrating the force over this step's dt up front makes the
             // output an impulse: the consumer no longer needs to know (or
             // guess) which timestep the simulation used.
-            var impulse = pressureForce * surfacePoint.areaWeight * deltaTime;
+            var impulse = fluidForce * surfacePoint.areaWeight * deltaTime;
             outputSurfacePoints[index] = new OutputSimulationSurfacePoints
             {
                 impulse = impulse
@@ -536,7 +536,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             mass = Mass,
             squaredSmoothingLength = m_SquaredSmoothingLength,
             smoothingLength = SmoothingLength,
-            kernelDerivativeTerm = m_KernelDerivativeTerm,
+            precalculatedKernelFactor = m_KernelTerm,
             viscosityCoefficient = ViscosityFactor,
             deltaTime = deltaTime,
 
@@ -727,33 +727,44 @@ public class FluidSim : MonoBehaviour, IFluidSim
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static Vector2 CalculatePressureAndViscosityForRigidObject(Vector2 position, Vector2 surfaceVelocity, GridSpatialLookup lookup, float mass,
-        float squaredSmoothingLength, float smoothingLength, float kernelDerivativeTerm, float viscosityCoefficient,
+    // Samples the fluid at a rigid-body surface point and returns the force per
+    // unit of surface length the fluid exerts there. Pressure and fluid
+    // velocity are SPH-interpolated with Shepard normalization (divide by the
+    // weight sum), so the estimate is unbiased even where particle coverage is
+    // partial. Pressure pushes along the inward surface normal (F = -p * n);
+    // drag opposes the surface's motion relative to the fluid.
+    static Vector2 CalculateFluidForceAtSurfacePoint(Vector2 position, Vector2 normal, Vector2 surfaceVelocity,
+        GridSpatialLookup lookup, float mass,
+        float squaredSmoothingLength, float smoothingLength, float kernelFactor, float dragCoefficient,
         ReadOnlySpan<Vector2> positions, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density, ReadOnlySpan<Vector2> velocities)
     {
         var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
         lookup.GetParticlesAround(position, particleIndices);
-        var pressureGradient = Vector2.zero;
-        var viscosityGradient = Vector2.zero;
-        //for (var j = 0; j < position.Length; j++)
+        var weightSum = 0f;
+        var pressureSum = 0f;
+        var velocitySum = Vector2.zero;
         foreach(var j in particleIndices)
         {
-            var dif = positions[j] - position;
-            var sqrDst = Vector2.SqrMagnitude(dif);
+            var sqrDst = Vector2.SqrMagnitude(positions[j] - position);
             if (sqrDst > squaredSmoothingLength) continue;
-            
-            var dir = dif.normalized;
-            var distance = Mathf.Sqrt(sqrDst);
-            var influenceGradient = SmoothingKernels.SmoothingKernel2Derivative(distance, smoothingLength);
-            // Relative velocity between surface and fluid particle
-            var relativeVelocity = surfaceVelocity - velocities[j];
-            
-            pressureGradient += dir * pressure[j] * mass / density[j] * influenceGradient;
-            //TODO: viscosity should ideally use the laplacian.
-            viscosityGradient += viscosityCoefficient * relativeVelocity * mass / density[j] * influenceGradient;
+
+            var w = mass / density[j] * SmoothingKernels.SmoothingKernel2(Mathf.Sqrt(sqrDst), smoothingLength, kernelFactor);
+            weightSum += w;
+            // Clamped to non-negative: negative pressure (density deficiency)
+            // would read as suction pulling the body into the fluid.
+            pressureSum += Mathf.Max(0f, pressure[j]) * w;
+            velocitySum += velocities[j] * w;
         }
         particleIndices.Dispose();
-        return pressureGradient + viscosityGradient;
+
+        // No fluid within kernel range: no force (and no division by zero).
+        if (weightSum <= 1e-6f) return Vector2.zero;
+
+        var interpolatedPressure = pressureSum / weightSum;
+        var interpolatedVelocity = velocitySum / weightSum;
+        var pressureForce = -normal * interpolatedPressure;
+        var dragForce = (interpolatedVelocity - surfaceVelocity) * dragCoefficient;
+        return pressureForce + dragForce;
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
