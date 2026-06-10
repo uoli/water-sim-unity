@@ -629,7 +629,10 @@ public class FluidSim : MonoBehaviour, IFluidSim
     float CalcCFLTimeStep(float maxVelocity)
     {
         const float courantNumber = 0.3f;
-        const float speedOfSound = 10.0f;
+        // Backported from main: for the linear EOS p = k * (density - rest),
+        // the speed of sound is sqrt(k). The previous hardcoded 10 made this
+        // guard ~7x too lax at the current stiffness, so it never engaged.
+        var speedOfSound = Mathf.Sqrt(Mathf.Max(1e-6f, m_PressureMultiplier));
         return courantNumber * SmoothingLength / (speedOfSound + maxVelocity);
     }
     

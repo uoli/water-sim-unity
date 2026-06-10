@@ -1004,7 +1004,7 @@ MonoBehaviour:
   Mass: 1
   SmoothingLength: 7.1
   m_PressureMultiplier: 5051.1
-  UseAdaptativeStepTime: 0
+  UseAdaptativeStepTime: 1
   SimulationStep: 0.02
   BoundaryPushStrength: 0
   CollisionDamping: 0.5

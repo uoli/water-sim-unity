@@ -276,6 +276,12 @@ public partial class FluidSimViz : MonoBehaviour
         {
             m_MousePressed = false;
         }
+        // OnGUI does not receive MouseUp when the release happens outside the
+        // game view, which left the interaction force latched on permanently.
+        if (m_MousePressed && !Input.GetMouseButton(0) && !Input.GetMouseButton(1))
+        {
+            m_MousePressed = false;
+        }
         
         if (Event.current.type != EventType.Repaint) return;
 
