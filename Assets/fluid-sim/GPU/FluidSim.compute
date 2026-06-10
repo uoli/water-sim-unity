@@ -4,8 +4,12 @@
 #pragma kernel ComputePressureForce
 #pragma kernel ComputeViscosity
 #pragma kernel ComputePositionFromVelocityAndHandleCollision
-#pragma kernel UpdateSpatialLookup_HashEntries
-#pragma kernel UpdateSpatialLookup_UpdateStartIndices
+#pragma kernel SpatialClear
+#pragma kernel SpatialHashAndCount
+#pragma kernel SpatialScanBlocks
+#pragma kernel SpatialScanBlockSums
+#pragma kernel SpatialAddBlockOffsets
+#pragma kernel SpatialScatter
 
 
 static const float PI = 3.1415926535897932384626433;
@@ -26,9 +30,14 @@ RWStructuredBuffer<float> Pressure;
 RWStructuredBuffer<float2> Velocity;
 RWStructuredBuffer<float2> ViscosityDelta;
 RWStructuredBuffer<float> DebugBuff;
-RWStructuredBuffer<SpatialEntryData> SpatialEntry;
-RWStructuredBuffer<int> StartIndices;
+RWStructuredBuffer<SpatialEntryData> UnsortedSpatialEntry;
+RWStructuredBuffer<SpatialEntryData> SpatialEntry; // grouped by cell after SpatialScatter
+RWStructuredBuffer<uint> CellCounts;     // particles per cell key
+RWStructuredBuffer<uint> CellStarts;     // exclusive prefix sum of CellCounts
+RWStructuredBuffer<uint> ScatterOffsets; // per-cell write cursor for SpatialScatter
+RWStructuredBuffer<uint> BlockSums;      // per-block totals for the two-level scan
 int ParticleCount;
+int NumBlocks;
 float Width;
 float Height;
 float Mass;
@@ -69,42 +78,158 @@ uint PositionToCellKey(float2 position)
     return cellKey;
 }
 
+// ---- Spatial lookup construction: counting sort by cell key ----
+// The cell table has ParticleCount entries (keys are hashed modulo
+// ParticleCount). Instead of sorting entries (O(n log^2 n) bitonic merge
+// passes, ~100 dispatches), count the particles in each cell, exclusive-scan
+// the counts into per-cell start offsets, and scatter each entry into its
+// cell's range: O(n) work in a fixed six dispatches per substep.
+
 [numthreads(64,1,1)]
-void UpdateSpatialLookup_HashEntries(uint3 id : SV_DispatchThreadID)
+void SpatialClear(uint3 id : SV_DispatchThreadID)
 {
-    int index = id.x;
+    uint index = id.x;
+    if (index >= (uint)ParticleCount) return;
+    CellCounts[index] = 0;
+    ScatterOffsets[index] = 0;
+}
+
+[numthreads(64,1,1)]
+void SpatialHashAndCount(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+    if (index >= (uint)ParticleCount) return;
     float2 position = PredictedPositions[index];
     int2 cell = PositionToCell(position);
     uint cellKey = CellPositionToKey(cell);
-    SpatialEntry[index].index = index;
-    SpatialEntry[index].cellKey = cellKey;
-    SpatialEntry[index].cell = cell;
-    StartIndices[index] = -1;
+    SpatialEntryData entry;
+    entry.index = index;
+    entry.cellKey = cellKey;
+    entry.cell = cell;
+    UnsortedSpatialEntry[index] = entry;
+    InterlockedAdd(CellCounts[cellKey], 1);
 }
 
-// void UpdateSpatialLookup2() {
-//     //Sort array by the cellKey this needs gpu sorting
-//     JobHandle dependencyJobHandle = default;
-//     var sortJob = m_SpatialLookup.SortJob();
-//     var sortJobHandle = sortJob.Schedule(dependencyJobHandle);
-//     sortJobHandle.Complete();
-// }
+// Two-level Blelloch exclusive scan: each 256-thread group scans a block of
+// 512 counts in groupshared memory and emits its total to BlockSums; a single
+// group then scans BlockSums, and the block offsets are added back. Supports
+// up to 512 * 512 = 262144 cells.
+#define SCAN_BLOCK_SIZE 512
+groupshared uint gs_Scan[SCAN_BLOCK_SIZE];
+
+[numthreads(256,1,1)]
+void SpatialScanBlocks(uint3 groupId : SV_GroupID, uint gi : SV_GroupIndex)
+{
+    uint base = groupId.x * SCAN_BLOCK_SIZE;
+    uint i0 = base + 2 * gi;
+    uint i1 = base + 2 * gi + 1;
+    gs_Scan[2 * gi]     = (i0 < (uint)ParticleCount) ? CellCounts[i0] : 0;
+    gs_Scan[2 * gi + 1] = (i1 < (uint)ParticleCount) ? CellCounts[i1] : 0;
+
+    // up-sweep
+    uint offset = 1;
+    for (uint d = SCAN_BLOCK_SIZE >> 1; d > 0; d >>= 1)
+    {
+        GroupMemoryBarrierWithGroupSync();
+        if (gi < d)
+        {
+            uint ai = offset * (2 * gi + 1) - 1;
+            uint bi = offset * (2 * gi + 2) - 1;
+            gs_Scan[bi] += gs_Scan[ai];
+        }
+        offset <<= 1;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    if (gi == 0)
+    {
+        BlockSums[groupId.x] = gs_Scan[SCAN_BLOCK_SIZE - 1];
+        gs_Scan[SCAN_BLOCK_SIZE - 1] = 0;
+    }
+
+    // down-sweep
+    for (uint d2 = 1; d2 < SCAN_BLOCK_SIZE; d2 <<= 1)
+    {
+        offset >>= 1;
+        GroupMemoryBarrierWithGroupSync();
+        if (gi < d2)
+        {
+            uint ai = offset * (2 * gi + 1) - 1;
+            uint bi = offset * (2 * gi + 2) - 1;
+            uint t = gs_Scan[ai];
+            gs_Scan[ai] = gs_Scan[bi];
+            gs_Scan[bi] += t;
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (i0 < (uint)ParticleCount) CellStarts[i0] = gs_Scan[2 * gi];
+    if (i1 < (uint)ParticleCount) CellStarts[i1] = gs_Scan[2 * gi + 1];
+}
+
+[numthreads(256,1,1)]
+void SpatialScanBlockSums(uint gi : SV_GroupIndex)
+{
+    gs_Scan[2 * gi]     = (2 * gi     < (uint)NumBlocks) ? BlockSums[2 * gi] : 0;
+    gs_Scan[2 * gi + 1] = (2 * gi + 1 < (uint)NumBlocks) ? BlockSums[2 * gi + 1] : 0;
+
+    // up-sweep
+    uint offset = 1;
+    for (uint d = SCAN_BLOCK_SIZE >> 1; d > 0; d >>= 1)
+    {
+        GroupMemoryBarrierWithGroupSync();
+        if (gi < d)
+        {
+            uint ai = offset * (2 * gi + 1) - 1;
+            uint bi = offset * (2 * gi + 2) - 1;
+            gs_Scan[bi] += gs_Scan[ai];
+        }
+        offset <<= 1;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    if (gi == 0)
+    {
+        gs_Scan[SCAN_BLOCK_SIZE - 1] = 0;
+    }
+
+    // down-sweep
+    for (uint d2 = 1; d2 < SCAN_BLOCK_SIZE; d2 <<= 1)
+    {
+        offset >>= 1;
+        GroupMemoryBarrierWithGroupSync();
+        if (gi < d2)
+        {
+            uint ai = offset * (2 * gi + 1) - 1;
+            uint bi = offset * (2 * gi + 2) - 1;
+            uint t = gs_Scan[ai];
+            gs_Scan[ai] = gs_Scan[bi];
+            gs_Scan[bi] += t;
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (2 * gi < (uint)NumBlocks) BlockSums[2 * gi] = gs_Scan[2 * gi];
+    if (2 * gi + 1 < (uint)NumBlocks) BlockSums[2 * gi + 1] = gs_Scan[2 * gi + 1];
+}
 
 [numthreads(64,1,1)]
-void UpdateSpatialLookup_UpdateStartIndices(uint3 id : SV_DispatchThreadID) {
+void SpatialAddBlockOffsets(uint3 id : SV_DispatchThreadID)
+{
     uint index = id.x;
-    if ((int)index >= ParticleCount) return;
+    if (index >= (uint)ParticleCount) return;
+    CellStarts[index] += BlockSums[index / SCAN_BLOCK_SIZE];
+}
 
-    uint prev_val = ParticleCount+2;
-    if (index > 0)
-    {
-        prev_val = SpatialEntry[index-1].cellKey;
-    }
-    uint current_val = SpatialEntry[index].cellKey;
-    if (current_val != prev_val)
-    {
-        StartIndices[current_val] = index;
-    }
+[numthreads(64,1,1)]
+void SpatialScatter(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+    if (index >= (uint)ParticleCount) return;
+    SpatialEntryData entry = UnsortedSpatialEntry[index];
+    uint offsetInCell;
+    InterlockedAdd(ScatterOffsets[entry.cellKey], 1, offsetInCell);
+    SpatialEntry[CellStarts[entry.cellKey] + offsetInCell] = entry;
 }
 
 //TODO: this can be calculated once outside the shader
@@ -150,12 +275,11 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
             visitedKeys[visitedCount] = cellKey;
             visitedCount++;
 
-            int spatialIndex = StartIndices[cellKey];
-            if (spatialIndex == -1) continue;
-            do
+            uint rangeStart = CellStarts[cellKey];
+            uint rangeEnd = rangeStart + CellCounts[cellKey];
+            for (uint s = rangeStart; s < rangeEnd; s++)
             {
-                SpatialEntryData entry = SpatialEntry[spatialIndex];
-                spatialIndex++;
+                SpatialEntryData entry = SpatialEntry[s];
 
                 // The bucket can also hold entries from far-away cells that hash
                 // to the same key; only accept the 3x3 neighborhood. Chebyshev
@@ -173,8 +297,7 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
                 //var influence = SmoothingKernel(sqrDst, squaredSmoothingLength, kernelTerm);
                 float influence = SmoothingKernel2(sqrt(sqrDst), SmoothingRadius, precalculatedKernelFactor);
                 density += Mass * influence;
-                
-            } while (spatialIndex < ParticleCount && SpatialEntry[spatialIndex].cellKey == cellKey);
+            }
         }
     }
     return density;
@@ -261,12 +384,11 @@ float2 CalculatePressureGradient(uint i) {
             visitedKeys[visitedCount] = cellKey;
             visitedCount++;
 
-            uint spatialIndex = StartIndices[cellKey];
-            if (spatialIndex == -1) continue;
-            do
+            uint rangeStart = CellStarts[cellKey];
+            uint rangeEnd = rangeStart + CellCounts[cellKey];
+            for (uint s = rangeStart; s < rangeEnd; s++)
             {
-                SpatialEntryData entry = SpatialEntry[spatialIndex];
-                spatialIndex++;
+                SpatialEntryData entry = SpatialEntry[s];
 
                 // Only accept entries from the 3x3 neighborhood (see CalculateDensity).
                 int2 cellDif = entry.cell - centralCell;
@@ -275,12 +397,12 @@ float2 CalculatePressureGradient(uint i) {
                 uint j = entry.index;
                 if (i == j) continue;
                 float2 neighbourPos = PredictedPositions[j];
-                float2 dif = neighbourPos - selfPos; 
+                float2 dif = neighbourPos - selfPos;
                 float sqrDst = dot(dif,dif);
                 if (sqrDst > SquaredSmoothingRadius) continue;
 
                 float distance = sqrt(sqrDst);
-                if (distance < 0.000001 || isnan(distance) ) 
+                if (distance < 0.000001 || isnan(distance) )
                 {
                     //points are too close we get numerical errors
                     //so calculate a random direction really close by.
@@ -294,8 +416,7 @@ float2 CalculatePressureGradient(uint i) {
                 float influence = SmoothingKernel2Derivative(distance, SmoothingRadius);
                 float averagedPressure = (Pressure[j] + Pressure[i]) / 2;
                 pressureGradient += dir * (averagedPressure * Mass) / Densities[j] * influence;
-                
-            } while (spatialIndex < (uint)ParticleCount && SpatialEntry[spatialIndex].cellKey == cellKey);
+            }
         }
     }
     return pressureGradient;
@@ -376,12 +497,11 @@ void ComputeViscosity(uint3 id : SV_DispatchThreadID)
             visitedKeys[visitedCount] = cellKey;
             visitedCount++;
 
-            uint spatialIndex = StartIndices[cellKey];
-            if (spatialIndex == -1) continue;
-            do
+            uint rangeStart = CellStarts[cellKey];
+            uint rangeEnd = rangeStart + CellCounts[cellKey];
+            for (uint s = rangeStart; s < rangeEnd; s++)
             {
-                SpatialEntryData entry = SpatialEntry[spatialIndex];
-                spatialIndex++;
+                SpatialEntryData entry = SpatialEntry[s];
 
                 // Only accept entries from the 3x3 neighborhood (see CalculateDensity).
                 int2 cellDif = entry.cell - centralCell;
@@ -399,8 +519,7 @@ void ComputeViscosity(uint3 id : SV_DispatchThreadID)
                 // the radius.
                 float influence = -SmoothingKernel2Derivative(distance, SmoothingRadius);
                 viscosityForce += (Velocity[j] - selfVel) * Mass / Densities[j] * influence;
-
-            } while (spatialIndex < (uint)ParticleCount && SpatialEntry[spatialIndex].cellKey == cellKey);
+            }
         }
     }
     ViscosityDelta[i] = viscosityForce * ViscosityFactor / Densities[i] * DeltaTime;
