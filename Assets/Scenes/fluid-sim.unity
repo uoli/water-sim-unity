@@ -225,7 +225,7 @@ Rigidbody2D:
   m_Simulated: 0
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 11.5
+  m_Mass: 50
   m_LinearDamping: 5
   m_AngularDamping: 5
   m_GravityScale: 1
@@ -385,7 +385,7 @@ MonoBehaviour:
   - position: {x: -0.5, y: -0.45}
     normal: {x: -1, y: -0}
     edgeLength: 0.1
-  SampleSpacing: 0.1
+  SampleSpacing: 0.03
   GenerateOnEnable: 1
 --- !u!61 &94077127
 BoxCollider2D:
