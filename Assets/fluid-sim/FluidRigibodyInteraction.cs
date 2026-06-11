@@ -28,9 +28,6 @@ public class FluidRigibodyInteraction : MonoBehaviour
         m_SimRect = m_FluidSim.Transform.GetComponent<RectTransform>();
         m_FluidSim.PreSimulation += PreSimulation;
         m_FluidSim.PostSimulation += PostSimulation;
-
-        m_SimInput = new InputSimulationSurfacePoints[m_SurfaceSampler.SurfacePoints.Count];
-        m_SimResults = new OutputSimulationSurfacePoints[m_SurfaceSampler.SurfacePoints.Count];
     }
 
     void OnDisable()
@@ -89,11 +86,46 @@ public class FluidRigibodyInteraction : MonoBehaviour
     void PreSimulation()
     {
         var points = m_SurfaceSampler.SurfacePoints;
-        var areaWeight = Area / points.Count;
+
+        // Sized lazily: the sampler may regenerate its points (OnEnable order
+        // between components is undefined, and the editor button can run at
+        // any time), so the count is only trusted at use.
+        if (m_SimInput == null || m_SimInput.Length != points.Count)
+        {
+            m_SimInput = new InputSimulationSurfacePoints[points.Count];
+            m_SimResults = new OutputSimulationSurfacePoints[points.Count];
+        }
+
+        // Generated samples carry the exact arc length they represent; convert
+        // it to sim units along the edge tangent. Legacy hand-placed lists
+        // (edgeLength never set) fall back to splitting the manual Area evenly.
+        var hasMeasuredLengths = false;
+        for (var i = 0; i < points.Count; i++)
+        {
+            if (points[i].edgeLength > 0f)
+            {
+                hasMeasuredLengths = true;
+                break;
+            }
+        }
+        var uniformWeight = Area / points.Count;
+
         for (var i = 0; i < points.Count; i++)
         {
             var p = points[i];
             var worldPoint = (Vector2)Rigidbody.transform.TransformPoint(p.position);
+
+            float areaWeight;
+            if (hasMeasuredLengths)
+            {
+                var localTangent = Vector2.Perpendicular(p.normal) * p.edgeLength;
+                var worldTangent = (Vector2)Rigidbody.transform.TransformVector(localTangent);
+                areaWeight = WorldToSimVector(worldTangent).magnitude;
+            }
+            else
+            {
+                areaWeight = uniformWeight;
+            }
 
             m_SimInput[i] = new InputSimulationSurfacePoints
             {
@@ -130,7 +162,7 @@ public class FluidRigibodyInteraction : MonoBehaviour
             scaleX * Rigidbody.transform.lossyScale.x,
             scaleY * Rigidbody.transform.lossyScale.y,
             anisotropic ? Rigidbody.rotation : 0f);
-        if (key == m_PseudoMassCacheKey) return;
+        if (m_PseudoMasses != null && m_PseudoMasses.Length == m_SimInput.Length && key == m_PseudoMassCacheKey) return;
         m_PseudoMassCacheKey = key;
 
         // Self-calibrating boundary pseudo-mass (Akinci et al. 2012):

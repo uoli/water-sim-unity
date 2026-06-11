@@ -5,6 +5,21 @@ using UnityEngine;
 [CustomEditor(typeof(SurfaceSampler2D))]
 public class SurfaceSampler2DEditor : Editor
 {
+    public override void OnInspectorGUI()
+    {
+        base.OnInspectorGUI();
+        var t = (SurfaceSampler2D)target;
+
+        EditorGUILayout.Space();
+        if (GUILayout.Button("Generate from collider"))
+        {
+            Undo.RecordObject(t, "Generate surface samples");
+            t.GenerateFromCollider();
+            EditorUtility.SetDirty(t);
+        }
+        EditorGUILayout.LabelField($"Samples: {t.SurfacePoints?.Count ?? 0}");
+    }
+
     protected virtual void OnSceneGUI()
     {
         SurfaceSampler2D t = (SurfaceSampler2D)target;
