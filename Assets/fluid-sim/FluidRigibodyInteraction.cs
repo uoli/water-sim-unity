@@ -24,7 +24,8 @@ public class FluidRigibodyInteraction : MonoBehaviour
     RectTransform m_SimRect;
     OutputSimulationSurfacePoints[] m_SimResults;
     InputSimulationSurfacePoints[] m_SimInput;
-    Vector2[] m_SmoothedImpulses;
+    Vector2[] m_AccumulatedImpulses;
+    Vector2[] m_SmoothedForces;
     float[] m_PseudoMasses;
     Vector4 m_PseudoMassCacheKey = new Vector4(float.NaN, 0, 0, 0);
 
@@ -204,37 +205,63 @@ public class FluidRigibodyInteraction : MonoBehaviour
 
         m_FluidSim.RetrieveRigidBodySurfaceResults(m_SimResults);
 
-        if (m_SmoothedImpulses == null || m_SmoothedImpulses.Length != m_SimResults.Length)
-            m_SmoothedImpulses = new Vector2[m_SimResults.Length];
+        if (m_AccumulatedImpulses == null || m_AccumulatedImpulses.Length != m_SimResults.Length)
+        {
+            m_AccumulatedImpulses = new Vector2[m_SimResults.Length];
+            m_SmoothedForces = new Vector2[m_SimResults.Length];
+        }
 
-        // 1 - exp(-dt/tau): exponential moving average with a framerate-
-        // independent time constant. Smoothed per point so the torque
-        // distribution over the hull is preserved.
-        var alpha = ImpulseSmoothingTime > 0f
-            ? 1f - Mathf.Exp(-Time.deltaTime / ImpulseSmoothingTime)
-            : 1f;
-
+        // Only accumulate here. The sim's substeps fire irregularly relative
+        // to the physics clock (some render frames run zero substeps), so
+        // applying impulses at this point delivers buoyancy in packets with
+        // gaps — the body falls between packets and gets kicked back ("jumpy").
+        // FixedUpdate converts the accumulated momentum into a continuous
+        // force where the physics engine actually integrates.
         for (var index = 0; index < m_SimResults.Length; index++)
         {
             var impulse = m_SimResults[index].impulse;
-            // Never let non-finite values into the average or the physics
-            // engine: if the fluid blows up (NaN/Infinity), drop the sample
-            // and say why, instead of poisoning the smoothing memory.
+            // Never let non-finite values into the accumulator: if the fluid
+            // blows up (NaN/Infinity), drop the sample and say why.
             if (!float.IsFinite(impulse.x) || !float.IsFinite(impulse.y))
             {
                 Debug.LogWarning($"Non-finite fluid impulse at surface point {index}; the fluid simulation has likely gone unstable. Skipping.", this);
                 continue;
             }
-            m_SmoothedImpulses[index] = Vector2.Lerp(m_SmoothedImpulses[index], impulse, alpha);
+            m_AccumulatedImpulses[index] += impulse;
+        }
+    }
+
+    void FixedUpdate()
+    {
+        if (m_AccumulatedImpulses == null) return;
+        var points = m_SurfaceSampler.SurfacePoints;
+        var count = Mathf.Min(m_AccumulatedImpulses.Length, points.Count);
+
+        var fixedDt = Time.fixedDeltaTime;
+        // 1 - exp(-dt/tau): exponential moving average with a framerate-
+        // independent time constant, evaluated at the fixed-step cadence.
+        // Smoothed per point so the torque distribution over the hull is
+        // preserved.
+        var alpha = ImpulseSmoothingTime > 0f
+            ? 1f - Mathf.Exp(-fixedDt / ImpulseSmoothingTime)
+            : 1f;
+
+        for (var index = 0; index < count; index++)
+        {
+            // Momentum accumulated since the last physics step, expressed as a
+            // force rate. The smoothed rate persists across physics steps that
+            // received no sim impulses, bridging the gaps that caused the
+            // jumpiness.
+            var forceRate = m_AccumulatedImpulses[index] / fixedDt;
+            m_AccumulatedImpulses[index] = Vector2.zero;
+            m_SmoothedForces[index] = Vector2.Lerp(m_SmoothedForces[index], forceRate, alpha);
+            if (m_SmoothedForces[index] == Vector2.zero) continue;
 
             // The sampled point is in the body's local space; the force must be
             // applied at its world position or the resulting torque is wrong.
-            var worldPoint = (Vector2)Rigidbody.transform.TransformPoint(m_SurfaceSampler.SurfacePoints[index].position);
-            // The sim reports the momentum exchanged during its step; Impulse
-            // mode transfers it exactly, independent of how render frames align
-            // with physics steps. No further dt belongs here.
-            var worldImpulse = SimToWorldVector(m_SmoothedImpulses[index]) * ForceScale;
-            Rigidbody.AddForceAtPosition(worldImpulse, worldPoint, ForceMode2D.Impulse);
+            var worldPoint = (Vector2)Rigidbody.transform.TransformPoint(points[index].position);
+            var worldForce = SimToWorldVector(m_SmoothedForces[index]) * ForceScale;
+            Rigidbody.AddForceAtPosition(worldForce, worldPoint, ForceMode2D.Force);
         }
     }
 
