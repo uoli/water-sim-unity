@@ -9,6 +9,8 @@
 #pragma kernel SpatialScanBlockSums
 #pragma kernel SpatialAddBlockOffsets
 #pragma kernel SpatialScatter
+#pragma kernel ComputeSurfaceForces
+#pragma kernel ClearSurfaceAccumulation
 
 
 static const float PI = 3.1415926535897932384626433;
@@ -28,6 +30,24 @@ RWStructuredBuffer<float> Densities;
 RWStructuredBuffer<float> Pressure;
 RWStructuredBuffer<float2> Velocity;
 RWStructuredBuffer<float2> VelocityDelta;
+
+// ---- Rigid-body surface samples (layout matches InputSimulationSurfacePoints) ----
+struct SurfacePointInput
+{
+    float2 position;   // sim space
+    float2 normal;     // outward, unit, sim space
+    float2 velocity;   // sim space
+    float areaWeight;  // arc length (sim units)
+    float pseudoMass;  // Akinci boundary pseudo-mass
+};
+struct SurfacePointOutput
+{
+    float2 impulse;    // this substep's exchanged momentum
+    float weightSum;   // Shepard denominator, for the symmetric reaction
+};
+StructuredBuffer<SurfacePointInput> SurfacePoints;
+RWStructuredBuffer<SurfacePointOutput> SurfaceResults;
+RWStructuredBuffer<float2> SurfaceImpulseAccum; // summed across substeps, read back once per frame
 RWStructuredBuffer<float> DebugBuff;
 RWStructuredBuffer<SpatialEntryData> UnsortedSpatialEntry;
 RWStructuredBuffer<SpatialEntryData> SpatialEntry; // grouped by cell after SpatialScatter
@@ -38,6 +58,8 @@ RWStructuredBuffer<uint> BlockSums;      // per-block totals for the two-level s
 int ParticleCount;
 int NumBlocks;
 int CellTableSize; // power of two
+int SurfacePointCount;
+float ContactDistance;
 float Width;
 float Height;
 float Mass;
@@ -299,6 +321,17 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
             }
         }
     }
+    // The rigid body's surface samples contribute their pseudo-mass exactly
+    // like fluid neighbors: approaching particles read rising density instead
+    // of a void, so pressure repulsion keeps fluid out of the body and the
+    // pressure sampled at the hull is hydrostatically correct.
+    for (int b = 0; b < SurfacePointCount; b++)
+    {
+        float2 bdif = SurfacePoints[b].position - pos;
+        float bSqrDst = dot(bdif, bdif);
+        if (bSqrDst > SquaredSmoothingRadius) continue;
+        density += SurfacePoints[b].pseudoMass * SmoothingKernel2(sqrt(bSqrDst), SmoothingRadius, precalculatedKernelFactor);
+    }
     return density;
 }
 
@@ -367,6 +400,89 @@ float2 InteractionForce(float2 particlePosition, float2 particleVelocity, float2
     float2 dirToInputPoint = distance <= EPSILON ? 0 : diff/distance;
     float centerT = 1 - distance / radius;
     return  (dirToInputPoint * strength - particleVelocity) * centerT;
+}
+
+// Samples the fluid at each rigid-body surface point: pressure and fluid
+// velocity are Shepard-interpolated from grid neighbors, pressure pushes along
+// the inward normal (F = -p * n * ds), drag opposes relative motion. The
+// substep impulse goes to SurfaceResults (consumed by the reaction in
+// ComputeForces) and accumulates into SurfaceImpulseAccum, which the CPU reads
+// back asynchronously once per frame.
+[numthreads(64,1,1)]
+void ComputeSurfaceForces(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if ((int)i >= SurfacePointCount) return;
+
+    SurfacePointInput sp = SurfacePoints[i];
+    float kernelFactor = CalcSmoothingKernel2Factor(SmoothingRadius);
+
+    float weightSum = 0;
+    float pressureSum = 0;
+    float2 velocitySum = 0;
+
+    int2 centralCell = PositionToCell(sp.position);
+    uint visitedKeys[9];
+    int visitedCount = 0;
+    for (int dx = -1; dx <= 1; dx++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            int2 cell = centralCell + int2(dx, dy);
+            uint cellKey = CellPositionToKey(cell);
+
+            bool alreadyVisited = false;
+            for (int v = 0; v < visitedCount; v++)
+            {
+                if (visitedKeys[v] == cellKey) alreadyVisited = true;
+            }
+            if (alreadyVisited) continue;
+            visitedKeys[visitedCount] = cellKey;
+            visitedCount++;
+
+            uint rangeStart = CellStarts[cellKey];
+            uint rangeEnd = rangeStart + CellCounts[cellKey];
+            for (uint s = rangeStart; s < rangeEnd; s++)
+            {
+                SpatialEntryData entry = SpatialEntry[s];
+                int2 cellDif = entry.cell - centralCell;
+                if (abs(cellDif.x) > 1 || abs(cellDif.y) > 1) continue;
+
+                uint j = entry.index;
+                float2 dif = PredictedPositions[j] - sp.position;
+                float sqrDst = dot(dif, dif);
+                if (sqrDst > SquaredSmoothingRadius) continue;
+
+                float w = Mass / Densities[j] * SmoothingKernel2(sqrt(sqrDst), SmoothingRadius, kernelFactor);
+                weightSum += w;
+                pressureSum += max(0, Pressure[j]) * w;
+                velocitySum += Velocity[j] * w;
+            }
+        }
+    }
+
+    float2 impulse = 0;
+    if (weightSum > 1e-6)
+    {
+        float interpolatedPressure = pressureSum / weightSum;
+        float2 interpolatedVelocity = velocitySum / weightSum;
+        float2 force = -sp.normal * interpolatedPressure
+            + (interpolatedVelocity - sp.velocity) * ViscosityFactor;
+        impulse = force * sp.areaWeight * DeltaTime;
+    }
+
+    SurfacePointOutput output;
+    output.impulse = impulse;
+    output.weightSum = weightSum;
+    SurfaceResults[i] = output;
+    SurfaceImpulseAccum[i] += impulse; // owner thread per point: no race
+}
+
+[numthreads(64,1,1)]
+void ClearSurfaceAccumulation(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= SurfacePointCount) return;
+    SurfaceImpulseAccum[id.x] = 0;
 }
 
 // Pressure, viscosity, gravity and interaction force in a single neighbor
@@ -453,6 +569,23 @@ void ComputeForces(uint3 id : SV_DispatchThreadID)
         interactionAcceleration = InteractionForce(selfPos, selfVel,
             float2(ForceCenterX, ForceCenterY), ForceRadius, ForceStrength);
 
+    // Newton's third law for the rigid body: each surface point's impulse was
+    // interpolated from nearby particles with weights w = (m/rho) * W; every
+    // particle gets back the equal-and-opposite share of that impulse
+    // (impulse-derived velocity change, NOT scaled by DeltaTime).
+    float2 reactionVelocityChange = 0;
+    for (int b = 0; b < SurfacePointCount; b++)
+    {
+        SurfacePointOutput surfaceOut = SurfaceResults[b];
+        if (surfaceOut.weightSum <= 1e-6) continue;
+        float2 bdif = selfPos - SurfacePoints[b].position;
+        float bSqrDst = dot(bdif, bdif);
+        if (bSqrDst > SquaredSmoothingRadius) continue;
+        float kf = CalcSmoothingKernel2Factor(SmoothingRadius);
+        float w = Mass / density * SmoothingKernel2(sqrt(bSqrDst), SmoothingRadius, kf);
+        reactionVelocityChange += -surfaceOut.impulse * (w / surfaceOut.weightSum) / Mass;
+    }
+
     // Gravity and the interaction force are already accelerations; only the
     // particle forces need the division by density.
     float2 gravityAcceleration = float2(0, -1) * Gravity;
@@ -460,7 +593,7 @@ void ComputeForces(uint3 id : SV_DispatchThreadID)
         + viscosityForce * ViscosityFactor / density
         + gravityAcceleration
         + interactionAcceleration;
-    VelocityDelta[i] = acceleration * DeltaTime;
+    VelocityDelta[i] = acceleration * DeltaTime + reactionVelocityChange;
 }
 
 [numthreads(64,1,1)]
@@ -470,6 +603,19 @@ void ComputePositionFromVelocityAndHandleCollision(uint3 id : SV_DispatchThreadI
 
     float2 position = Positions[index];
     float2 velocity = Velocity[index] + VelocityDelta[index];
+
+    // Anti-tunneling backstop: the boundary-density barrier is soft, so within
+    // contact distance of a surface sample remove the velocity component moving
+    // into the surface (free slip, relative to the moving surface).
+    for (int b = 0; b < SurfacePointCount; b++)
+    {
+        float2 bdif = position - SurfacePoints[b].position;
+        if (dot(bdif, bdif) > ContactDistance * ContactDistance) continue;
+        float relativeNormalSpeed = dot(velocity - SurfacePoints[b].velocity, SurfacePoints[b].normal);
+        if (relativeNormalSpeed < 0)
+            velocity -= relativeNormalSpeed * SurfacePoints[b].normal;
+    }
+
     position += velocity * DeltaTime;
             
     if (position.x < SmoothingRadius)

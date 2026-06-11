@@ -64,6 +64,14 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     ComputeBuffer m_ScatterOffsetsBuffer;
     ComputeBuffer m_BlockSumsBuffer;
     ComputeBuffer m_VelocityDeltaBuffer;
+    ComputeBuffer m_SurfacePointsBuffer;
+    ComputeBuffer m_SurfaceResultsBuffer;
+    ComputeBuffer m_SurfaceAccumBuffer;
+    InputSimulationSurfacePoints[] m_SurfacePointData;
+    Vector2[] m_RetrievedImpulses;
+    readonly Queue<(UnityEngine.Rendering.AsyncGPUReadbackRequest request, float simTime)> m_PendingSurfaceReadbacks = new();
+    int m_SurfacePointCount;
+    float m_LastCoveredSimTime;
 
     const int k_ScanBlockSize = 512;
 
@@ -77,6 +85,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     int m_KernelDensityPressure;
     int m_KernelForces;
     int m_KernelIntegrate;
+    int m_KernelSurfaceForces;
+    int m_KernelClearSurfaceAccum;
     int m_GroupsParticles;
     int m_GroupsTable;
     int m_ScanBlockCount;
@@ -173,6 +183,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_PointVelocityBuffer.name = "VelocityBuffer";
         m_VelocityDeltaBuffer = new ComputeBuffer(ParticleCount, Marshal.SizeOf(typeof(Vector2)));
         m_VelocityDeltaBuffer.name = "VelocityDeltaBuffer";
+        if (m_SurfacePointsBuffer == null)
+            CreateSurfaceBuffers(1); // dummy size so kernels always have valid bindings
         m_PointBuffer.SetData(m_PointPositionData);
         m_PointDensitiesBuffer.SetData(m_PointDensitiesData);
         m_PointPressureBuffer.SetData(m_PointDensitiesData);
@@ -221,6 +233,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_KernelDensityPressure = SimComputeShader.FindKernel("ComputeDensityAndPressure");
         m_KernelForces = SimComputeShader.FindKernel("ComputeForces");
         m_KernelIntegrate = SimComputeShader.FindKernel("ComputePositionFromVelocityAndHandleCollision");
+        m_KernelSurfaceForces = SimComputeShader.FindKernel("ComputeSurfaceForces");
+        m_KernelClearSurfaceAccum = SimComputeShader.FindKernel("ClearSurfaceAccumulation");
 
         m_GroupsParticles = Mathf.CeilToInt(ParticleCount / 64f);
         m_GroupsTable = Mathf.CeilToInt(m_CellTableSize / 64f);
@@ -275,6 +289,45 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetBuffer(m_KernelIntegrate, "Positions", m_PointBuffer);
         SimComputeShader.SetBuffer(m_KernelIntegrate, "Velocity", m_PointVelocityBuffer);
         SimComputeShader.SetBuffer(m_KernelIntegrate, "VelocityDelta", m_VelocityDeltaBuffer);
+
+        BindSurfaceBuffers();
+    }
+
+    void CreateSurfaceBuffers(int count)
+    {
+        m_SurfacePointsBuffer?.Release();
+        m_SurfaceResultsBuffer?.Release();
+        m_SurfaceAccumBuffer?.Release();
+        m_SurfacePointsBuffer = new ComputeBuffer(count, Marshal.SizeOf(typeof(InputSimulationSurfacePoints)));
+        m_SurfacePointsBuffer.name = "SurfacePointsBuffer";
+        m_SurfaceResultsBuffer = new ComputeBuffer(count, Marshal.SizeOf(typeof(OutputSimulationSurfacePoints)));
+        m_SurfaceResultsBuffer.name = "SurfaceResultsBuffer";
+        m_SurfaceAccumBuffer = new ComputeBuffer(count, Marshal.SizeOf(typeof(Vector2)));
+        m_SurfaceAccumBuffer.name = "SurfaceImpulseAccumBuffer";
+        m_SurfaceAccumBuffer.SetData(new Vector2[count]);
+    }
+
+    void BindSurfaceBuffers()
+    {
+        SimComputeShader.SetBuffer(m_KernelDensityPressure, "SurfacePoints", m_SurfacePointsBuffer);
+
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "SurfacePoints", m_SurfacePointsBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "SurfaceResults", m_SurfaceResultsBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "SurfaceImpulseAccum", m_SurfaceAccumBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "SpatialEntry", m_SpatialEntryBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "CellStarts", m_CellStartsBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "CellCounts", m_CellCountsBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "PredictedPositions", m_PredictedPositionBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "Densities", m_PointDensitiesBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "Pressure", m_PointPressureBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "Velocity", m_PointVelocityBuffer);
+
+        SimComputeShader.SetBuffer(m_KernelForces, "SurfacePoints", m_SurfacePointsBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "SurfaceResults", m_SurfaceResultsBuffer);
+
+        SimComputeShader.SetBuffer(m_KernelIntegrate, "SurfacePoints", m_SurfacePointsBuffer);
+
+        SimComputeShader.SetBuffer(m_KernelClearSurfaceAccum, "SurfaceImpulseAccum", m_SurfaceAccumBuffer);
     }
     void CleanupComputeBuffers()
     {
@@ -290,6 +343,16 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             m_PointVelocityBuffer.Release();
         if (m_VelocityDeltaBuffer != null)
             m_VelocityDeltaBuffer.Release();
+        if (m_SurfacePointsBuffer != null)
+            m_SurfacePointsBuffer.Release();
+        if (m_SurfaceResultsBuffer != null)
+            m_SurfaceResultsBuffer.Release();
+        if (m_SurfaceAccumBuffer != null)
+            m_SurfaceAccumBuffer.Release();
+        m_SurfacePointsBuffer = null;
+        m_SurfaceResultsBuffer = null;
+        m_SurfaceAccumBuffer = null;
+        m_PendingSurfaceReadbacks.Clear();
 
         if (m_SpatialEntryBuffer != null)
             m_SpatialEntryBuffer.Release();
@@ -319,6 +382,10 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
             InitParticleData();
         }
 
+        // Registers this frame's surface points (body pose is fixed-step
+        // driven, so once per frame is exact within the frame).
+        PreSimulation?.Invoke();
+
         var externalForceStrength = ExternalForceStrength;
         if (m_InteractionDirection == InteractionDirection.Repel)
         {
@@ -343,6 +410,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("ForceStrength", externalForceStrength); 
         SimComputeShader.SetFloat("Gravity", Gravity);
         SimComputeShader.SetFloat("ViscosityFactor", ViscosityFactor);
+        SimComputeShader.SetInt("SurfacePointCount", m_SurfacePointCount);
+        SimComputeShader.SetFloat("ContactDistance", SmoothingRadius * 0.25f);
 
         // Fixed-timestep accumulator: take deltaTime-sized substeps to cover the
         // elapsed wall-clock time, so simulation speed is independent of framerate.
@@ -369,6 +438,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
 
             s_SimKernelsPerfMarker.Begin();
             SimComputeShader.Dispatch(m_KernelDensityPressure, m_GroupsParticles, 1, 1);
+            if (m_SurfacePointCount > 0)
+                SimComputeShader.Dispatch(m_KernelSurfaceForces, Mathf.CeilToInt(m_SurfacePointCount / 64f), 1, 1);
             SimComputeShader.Dispatch(m_KernelForces, m_GroupsParticles, 1, 1);
             SimComputeShader.Dispatch(m_KernelIntegrate, m_GroupsParticles, 1, 1);
             s_SimKernelsPerfMarker.End();
@@ -385,6 +456,17 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_DebugBuffer.GetData(m_DebugData);
         m_PredictedPositionBuffer.GetData(m_PredictedPositionData);
 */
+        // Read the frame's accumulated surface impulses back asynchronously and
+        // reset the accumulator for the next frame; deliver any completed
+        // readbacks to the coupling.
+        if (m_SurfacePointCount > 0 && steps > 0)
+        {
+            m_PendingSurfaceReadbacks.Enqueue(
+                (UnityEngine.Rendering.AsyncGPUReadback.Request(m_SurfaceAccumBuffer), steps * deltaTime));
+            SimComputeShader.Dispatch(m_KernelClearSurfaceAccum, Mathf.CeilToInt(m_SurfacePointCount / 64f), 1, 1);
+        }
+        ProcessSurfaceReadbacks();
+
         m_ExternalForceRadius = 0; //clear External Force interaction
 
         
@@ -406,16 +488,59 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_InteractionDirection = interactionDirection;
     }
 
-    // ---- Rigid-body coupling: not implemented on the GPU path yet. ----
-    // The interface members exist so FluidRigibodyInteraction can target either
-    // sim; on this path registration is accepted and ignored.
-#pragma warning disable 0067 // events never invoked on this path
+    // ---- Rigid-body coupling ----
+    // PreSimulation fires once per frame (the body's pose is constant within a
+    // frame's substeps); the registered surface points are uploaded once and
+    // used by every substep. Impulses accumulate on the GPU across substeps
+    // and are read back asynchronously: PostSimulation fires when a readback
+    // completes, with LastStepDeltaTime reporting the sim time those impulses
+    // cover. The frame of latency is absorbed by the coupling's rate
+    // estimator, with no pipeline stall.
     public event Action PreSimulation;
     public event Action PostSimulation;
-#pragma warning restore 0067
-    public void SetRigidBodySurfaceResults(IList<InputSimulationSurfacePoints> points) { }
-    public void RetrieveRigidBodySurfaceResults(IList<OutputSimulationSurfacePoints> points) { }
-    public ComputeBuffer InputExternalPoints => null;
+
+    public void SetRigidBodySurfaceResults(IList<InputSimulationSurfacePoints> points)
+    {
+        m_SurfacePointCount = points.Count;
+        if (m_SurfacePointCount == 0) return;
+        if (m_SurfacePointData == null || m_SurfacePointData.Length < m_SurfacePointCount)
+        {
+            m_SurfacePointData = new InputSimulationSurfacePoints[m_SurfacePointCount];
+            m_RetrievedImpulses = new Vector2[m_SurfacePointCount];
+            CreateSurfaceBuffers(m_SurfacePointCount);
+            BindSurfaceBuffers();
+        }
+        for (var i = 0; i < m_SurfacePointCount; i++)
+            m_SurfacePointData[i] = points[i];
+        m_SurfacePointsBuffer.SetData(m_SurfacePointData, 0, 0, m_SurfacePointCount);
+    }
+
+    public void RetrieveRigidBodySurfaceResults(IList<OutputSimulationSurfacePoints> points)
+    {
+        if (m_RetrievedImpulses == null) return;
+        var count = Mathf.Min(m_RetrievedImpulses.Length, points.Count);
+        for (var i = 0; i < count; i++)
+        {
+            points[i] = new OutputSimulationSurfacePoints { impulse = m_RetrievedImpulses[i], weightSum = 1f };
+        }
+    }
+
+    void ProcessSurfaceReadbacks()
+    {
+        while (m_PendingSurfaceReadbacks.Count > 0 && m_PendingSurfaceReadbacks.Peek().request.done)
+        {
+            var (request, simTime) = m_PendingSurfaceReadbacks.Dequeue();
+            if (request.hasError) continue;
+            var data = request.GetData<Vector2>();
+            var count = Mathf.Min(data.Length, m_RetrievedImpulses?.Length ?? 0);
+            for (var i = 0; i < count; i++)
+                m_RetrievedImpulses[i] = data[i];
+            m_LastCoveredSimTime = simTime;
+            PostSimulation?.Invoke();
+        }
+    }
+
+    public ComputeBuffer InputExternalPoints => m_SurfacePointCount > 0 ? m_SurfacePointsBuffer : null;
     Transform IFluidSim.Transform => transform;
-    public float LastStepDeltaTime => EffectiveDeltaTime;
+    public float LastStepDeltaTime => m_LastCoveredSimTime;
 }
