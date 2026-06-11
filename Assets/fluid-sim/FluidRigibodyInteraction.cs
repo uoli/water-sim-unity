@@ -12,12 +12,19 @@ public class FluidRigibodyInteraction : MonoBehaviour
     // Conversion between the simulation's arbitrary mass unit and kilograms.
     // Lengths and times are converted exactly; mass is the one free unit.
     public float ForceScale = 1f;
+    // Time constant (seconds) of the exponential smoothing applied to the
+    // impulses before they reach the body. The high-frequency content of the
+    // sampled fluid force is discretization noise — particles entering and
+    // leaving kernels, WCSPH pressure fluctuations — not fluid dynamics; a
+    // real hull's inertia would never respond to it. 0 disables smoothing.
+    public float ImpulseSmoothingTime = 0.08f;
 
     SurfaceSampler2D m_SurfaceSampler;
     IFluidSim m_FluidSim;
     RectTransform m_SimRect;
     OutputSimulationSurfacePoints[] m_SimResults;
     InputSimulationSurfacePoints[] m_SimInput;
+    Vector2[] m_SmoothedImpulses;
     float[] m_PseudoMasses;
     Vector4 m_PseudoMassCacheKey = new Vector4(float.NaN, 0, 0, 0);
 
@@ -197,24 +204,36 @@ public class FluidRigibodyInteraction : MonoBehaviour
 
         m_FluidSim.RetrieveRigidBodySurfaceResults(m_SimResults);
 
+        if (m_SmoothedImpulses == null || m_SmoothedImpulses.Length != m_SimResults.Length)
+            m_SmoothedImpulses = new Vector2[m_SimResults.Length];
+
+        // 1 - exp(-dt/tau): exponential moving average with a framerate-
+        // independent time constant. Smoothed per point so the torque
+        // distribution over the hull is preserved.
+        var alpha = ImpulseSmoothingTime > 0f
+            ? 1f - Mathf.Exp(-Time.deltaTime / ImpulseSmoothingTime)
+            : 1f;
+
         for (var index = 0; index < m_SimResults.Length; index++)
         {
-            var simResult = m_SimResults[index];
+            var impulse = m_SimResults[index].impulse;
+            // Never let non-finite values into the average or the physics
+            // engine: if the fluid blows up (NaN/Infinity), drop the sample
+            // and say why, instead of poisoning the smoothing memory.
+            if (!float.IsFinite(impulse.x) || !float.IsFinite(impulse.y))
+            {
+                Debug.LogWarning($"Non-finite fluid impulse at surface point {index}; the fluid simulation has likely gone unstable. Skipping.", this);
+                continue;
+            }
+            m_SmoothedImpulses[index] = Vector2.Lerp(m_SmoothedImpulses[index], impulse, alpha);
+
             // The sampled point is in the body's local space; the force must be
             // applied at its world position or the resulting torque is wrong.
             var worldPoint = (Vector2)Rigidbody.transform.TransformPoint(m_SurfaceSampler.SurfacePoints[index].position);
             // The sim reports the momentum exchanged during its step; Impulse
             // mode transfers it exactly, independent of how render frames align
             // with physics steps. No further dt belongs here.
-            var worldImpulse = SimToWorldVector(simResult.impulse) * ForceScale;
-            // Never forward non-finite values to the physics engine: if the
-            // fluid blows up (NaN/Infinity), drop the exchange and say why,
-            // instead of corrupting the rigid body and spamming engine errors.
-            if (!float.IsFinite(worldImpulse.x) || !float.IsFinite(worldImpulse.y))
-            {
-                Debug.LogWarning($"Non-finite fluid impulse at surface point {index}; the fluid simulation has likely gone unstable. Skipping.", this);
-                continue;
-            }
+            var worldImpulse = SimToWorldVector(m_SmoothedImpulses[index]) * ForceScale;
             Rigidbody.AddForceAtPosition(worldImpulse, worldPoint, ForceMode2D.Impulse);
         }
     }
