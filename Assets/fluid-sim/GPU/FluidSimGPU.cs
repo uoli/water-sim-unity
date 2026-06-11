@@ -270,20 +270,20 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetBuffer(m_KernelScatter, "CellStarts", m_CellStartsBuffer);
         SimComputeShader.SetBuffer(m_KernelScatter, "ScatterOffsets", m_ScatterOffsetsBuffer);
 
-        SimComputeShader.SetBuffer(m_KernelDensityPressure, "SpatialEntry", m_SpatialEntryBuffer);
-        SimComputeShader.SetBuffer(m_KernelDensityPressure, "CellStarts", m_CellStartsBuffer);
-        SimComputeShader.SetBuffer(m_KernelDensityPressure, "CellCounts", m_CellCountsBuffer);
-        SimComputeShader.SetBuffer(m_KernelDensityPressure, "PredictedPositions", m_PredictedPositionBuffer);
+        SimComputeShader.SetBuffer(m_KernelDensityPressure, "SpatialEntryRO", m_SpatialEntryBuffer);
+        SimComputeShader.SetBuffer(m_KernelDensityPressure, "CellStartsRO", m_CellStartsBuffer);
+        SimComputeShader.SetBuffer(m_KernelDensityPressure, "CellCountsRO", m_CellCountsBuffer);
+        SimComputeShader.SetBuffer(m_KernelDensityPressure, "PredictedPositionsRO", m_PredictedPositionBuffer);
         SimComputeShader.SetBuffer(m_KernelDensityPressure, "Densities", m_PointDensitiesBuffer);
         SimComputeShader.SetBuffer(m_KernelDensityPressure, "Pressure", m_PointPressureBuffer);
 
-        SimComputeShader.SetBuffer(m_KernelForces, "SpatialEntry", m_SpatialEntryBuffer);
-        SimComputeShader.SetBuffer(m_KernelForces, "CellStarts", m_CellStartsBuffer);
-        SimComputeShader.SetBuffer(m_KernelForces, "CellCounts", m_CellCountsBuffer);
-        SimComputeShader.SetBuffer(m_KernelForces, "PredictedPositions", m_PredictedPositionBuffer);
-        SimComputeShader.SetBuffer(m_KernelForces, "Densities", m_PointDensitiesBuffer);
-        SimComputeShader.SetBuffer(m_KernelForces, "Pressure", m_PointPressureBuffer);
-        SimComputeShader.SetBuffer(m_KernelForces, "Velocity", m_PointVelocityBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "SpatialEntryRO", m_SpatialEntryBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "CellStartsRO", m_CellStartsBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "CellCountsRO", m_CellCountsBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "PredictedPositionsRO", m_PredictedPositionBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "DensitiesRO", m_PointDensitiesBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "PressureRO", m_PointPressureBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "VelocityRO", m_PointVelocityBuffer);
         SimComputeShader.SetBuffer(m_KernelForces, "VelocityDelta", m_VelocityDeltaBuffer);
 
         SimComputeShader.SetBuffer(m_KernelIntegrate, "Positions", m_PointBuffer);
@@ -314,16 +314,16 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetBuffer(m_KernelSurfaceForces, "SurfacePoints", m_SurfacePointsBuffer);
         SimComputeShader.SetBuffer(m_KernelSurfaceForces, "SurfaceResults", m_SurfaceResultsBuffer);
         SimComputeShader.SetBuffer(m_KernelSurfaceForces, "SurfaceImpulseAccum", m_SurfaceAccumBuffer);
-        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "SpatialEntry", m_SpatialEntryBuffer);
-        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "CellStarts", m_CellStartsBuffer);
-        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "CellCounts", m_CellCountsBuffer);
-        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "PredictedPositions", m_PredictedPositionBuffer);
-        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "Densities", m_PointDensitiesBuffer);
-        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "Pressure", m_PointPressureBuffer);
-        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "Velocity", m_PointVelocityBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "SpatialEntryRO", m_SpatialEntryBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "CellStartsRO", m_CellStartsBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "CellCountsRO", m_CellCountsBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "PredictedPositionsRO", m_PredictedPositionBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "DensitiesRO", m_PointDensitiesBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "PressureRO", m_PointPressureBuffer);
+        SimComputeShader.SetBuffer(m_KernelSurfaceForces, "VelocityRO", m_PointVelocityBuffer);
 
         SimComputeShader.SetBuffer(m_KernelForces, "SurfacePoints", m_SurfacePointsBuffer);
-        SimComputeShader.SetBuffer(m_KernelForces, "SurfaceResults", m_SurfaceResultsBuffer);
+        SimComputeShader.SetBuffer(m_KernelForces, "SurfaceResultsRO", m_SurfaceResultsBuffer);
 
         SimComputeShader.SetBuffer(m_KernelIntegrate, "SurfacePoints", m_SurfacePointsBuffer);
 

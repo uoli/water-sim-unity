@@ -48,6 +48,19 @@ struct SurfacePointOutput
 StructuredBuffer<SurfacePointInput> SurfacePoints;
 RWStructuredBuffer<SurfacePointOutput> SurfaceResults;
 RWStructuredBuffer<float2> SurfaceImpulseAccum; // summed across substeps, read back once per frame
+
+// Read-only aliases (SRVs) of the buffers above. D3D11 caps UAVs at 8 per
+// dispatch and the force/density kernels only read most of their inputs, so
+// those kernels use these names; the C# side binds the same ComputeBuffers
+// under both names.
+StructuredBuffer<float2> PredictedPositionsRO;
+StructuredBuffer<float> DensitiesRO;
+StructuredBuffer<float> PressureRO;
+StructuredBuffer<float2> VelocityRO;
+StructuredBuffer<SpatialEntryData> SpatialEntryRO;
+StructuredBuffer<uint> CellStartsRO;
+StructuredBuffer<uint> CellCountsRO;
+StructuredBuffer<SurfacePointOutput> SurfaceResultsRO;
 RWStructuredBuffer<float> DebugBuff;
 RWStructuredBuffer<SpatialEntryData> UnsortedSpatialEntry;
 RWStructuredBuffer<SpatialEntryData> SpatialEntry; // grouped by cell after SpatialScatter
@@ -270,7 +283,7 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
 {
     //var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
     //lookup.GetParticlesAround(pos, particleIndices);
-    float2 pos = PredictedPositions[particleIndex];
+    float2 pos = PredictedPositionsRO[particleIndex];
     
     float density = 0;
 
@@ -296,11 +309,11 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
             visitedKeys[visitedCount] = cellKey;
             visitedCount++;
 
-            uint rangeStart = CellStarts[cellKey];
-            uint rangeEnd = rangeStart + CellCounts[cellKey];
+            uint rangeStart = CellStartsRO[cellKey];
+            uint rangeEnd = rangeStart + CellCountsRO[cellKey];
             for (uint s = rangeStart; s < rangeEnd; s++)
             {
-                SpatialEntryData entry = SpatialEntry[s];
+                SpatialEntryData entry = SpatialEntryRO[s];
 
                 // The bucket can also hold entries from far-away cells that hash
                 // to the same key; only accept the 3x3 neighborhood. Chebyshev
@@ -310,7 +323,7 @@ float CalculateDensity(int particleIndex, float precalculatedKernelFactor)
                 if (abs(cellDif.x) > 1 || abs(cellDif.y) > 1) continue;
 
                 uint i = entry.index;
-                float2 neighbourPosition = PredictedPositions[i];
+                float2 neighbourPosition = PredictedPositionsRO[i];
                 float2 diff = neighbourPosition - pos;
                 float sqrDst = dot(diff,diff);
                 sqrDst = max(sqrDst, 0.0);
@@ -440,23 +453,23 @@ void ComputeSurfaceForces(uint3 id : SV_DispatchThreadID)
             visitedKeys[visitedCount] = cellKey;
             visitedCount++;
 
-            uint rangeStart = CellStarts[cellKey];
-            uint rangeEnd = rangeStart + CellCounts[cellKey];
+            uint rangeStart = CellStartsRO[cellKey];
+            uint rangeEnd = rangeStart + CellCountsRO[cellKey];
             for (uint s = rangeStart; s < rangeEnd; s++)
             {
-                SpatialEntryData entry = SpatialEntry[s];
+                SpatialEntryData entry = SpatialEntryRO[s];
                 int2 cellDif = entry.cell - centralCell;
                 if (abs(cellDif.x) > 1 || abs(cellDif.y) > 1) continue;
 
                 uint j = entry.index;
-                float2 dif = PredictedPositions[j] - sp.position;
+                float2 dif = PredictedPositionsRO[j] - sp.position;
                 float sqrDst = dot(dif, dif);
                 if (sqrDst > SquaredSmoothingRadius) continue;
 
-                float w = Mass / Densities[j] * SmoothingKernel2(sqrt(sqrDst), SmoothingRadius, kernelFactor);
+                float w = Mass / DensitiesRO[j] * SmoothingKernel2(sqrt(sqrDst), SmoothingRadius, kernelFactor);
                 weightSum += w;
-                pressureSum += max(0, Pressure[j]) * w;
-                velocitySum += Velocity[j] * w;
+                pressureSum += max(0, PressureRO[j]) * w;
+                velocitySum += VelocityRO[j] * w;
             }
         }
     }
@@ -496,10 +509,10 @@ void ComputeForces(uint3 id : SV_DispatchThreadID)
     uint i = id.x;
     if ((int)i >= ParticleCount) return;
 
-    float2 selfPos = PredictedPositions[i];
-    float2 selfVel = Velocity[i];
-    float selfPressure = Pressure[i];
-    float density = Densities[i];
+    float2 selfPos = PredictedPositionsRO[i];
+    float2 selfVel = VelocityRO[i];
+    float selfPressure = PressureRO[i];
+    float density = DensitiesRO[i];
 
     float2 pressureGradient = 0;
     float2 viscosityForce = 0;
@@ -525,11 +538,11 @@ void ComputeForces(uint3 id : SV_DispatchThreadID)
             visitedKeys[visitedCount] = cellKey;
             visitedCount++;
 
-            uint rangeStart = CellStarts[cellKey];
-            uint rangeEnd = rangeStart + CellCounts[cellKey];
+            uint rangeStart = CellStartsRO[cellKey];
+            uint rangeEnd = rangeStart + CellCountsRO[cellKey];
             for (uint s = rangeStart; s < rangeEnd; s++)
             {
-                SpatialEntryData entry = SpatialEntry[s];
+                SpatialEntryData entry = SpatialEntryRO[s];
 
                 // Only accept entries from the 3x3 neighborhood (see CalculateDensity).
                 int2 cellDif = entry.cell - centralCell;
@@ -537,7 +550,7 @@ void ComputeForces(uint3 id : SV_DispatchThreadID)
 
                 uint j = entry.index;
                 if (i == j) continue;
-                float2 dif = PredictedPositions[j] - selfPos;
+                float2 dif = PredictedPositionsRO[j] - selfPos;
                 float sqrDst = dot(dif, dif);
                 if (sqrDst > SquaredSmoothingRadius) continue;
 
@@ -551,15 +564,15 @@ void ComputeForces(uint3 id : SV_DispatchThreadID)
                 }
                 float2 dir = dif/distance;
                 float derivative = SmoothingKernel2Derivative(distance, SmoothingRadius);
-                float neighbourDensity = Densities[j];
+                float neighbourDensity = DensitiesRO[j];
 
-                float averagedPressure = (Pressure[j] + selfPressure) / 2;
+                float averagedPressure = (PressureRO[j] + selfPressure) / 2;
                 pressureGradient += dir * (averagedPressure * Mass) / neighbourDensity * derivative;
 
                 // Viscosity needs a positive kernel weight so the force points
                 // toward the neighbor's velocity; the spiky derivative is
                 // negative inside the radius.
-                viscosityForce += (Velocity[j] - selfVel) * Mass / neighbourDensity * -derivative;
+                viscosityForce += (VelocityRO[j] - selfVel) * Mass / neighbourDensity * -derivative;
             }
         }
     }
@@ -576,7 +589,7 @@ void ComputeForces(uint3 id : SV_DispatchThreadID)
     float2 reactionVelocityChange = 0;
     for (int b = 0; b < SurfacePointCount; b++)
     {
-        SurfacePointOutput surfaceOut = SurfaceResults[b];
+        SurfacePointOutput surfaceOut = SurfaceResultsRO[b];
         if (surfaceOut.weightSum <= 1e-6) continue;
         float2 bdif = selfPos - SurfacePoints[b].position;
         float bSqrDst = dot(bdif, bdif);
