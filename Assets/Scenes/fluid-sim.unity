@@ -131,6 +131,7 @@ GameObject:
   - component: {fileID: 94077123}
   - component: {fileID: 94077126}
   - component: {fileID: 94077125}
+  - component: {fileID: 94077127}
   m_Layer: 0
   m_Name: Square
   m_TagString: Untagged
@@ -209,7 +210,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 1.54, y: 1.156}
+  m_AnchoredPosition: {x: -1.06, y: 4.66}
   m_SizeDelta: {x: 1, y: 1}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!50 &94077125
@@ -252,46 +253,186 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   SurfacePoints:
-  - position: {x: -0.5036197, y: -0.09403944}
-    normal: {x: -1, y: 0}
-  - position: {x: 0.058479548, y: -0.5037806}
-    normal: {x: 0.026411422, y: -0.9996512}
-  - position: {x: 0.50128996, y: -0.5020983}
-    normal: {x: 0.73614705, y: -0.6768216}
-  - position: {x: -0.5009062, y: -0.49559283}
-    normal: {x: -0.6812686, y: -0.7320335}
-  - position: {x: -0.3355987, y: -0.4941194}
+  - position: {x: -0.5, y: -0.5}
+    normal: {x: -0.70710677, y: -0.70710677}
+    edgeLength: 0
+  - position: {x: -0.45, y: -0.5}
     normal: {x: 0, y: -1}
-  - position: {x: -0.15726817, y: -0.49907923}
+    edgeLength: 0.1
+  - position: {x: -0.35, y: -0.5}
     normal: {x: 0, y: -1}
-  - position: {x: 0.2975676, y: -0.5023172}
+    edgeLength: 0.1
+  - position: {x: -0.25, y: -0.5}
     normal: {x: 0, y: -1}
-  - position: {x: -0.496395, y: -0.30973077}
-    normal: {x: -1, y: 0}
-  - position: {x: -0.50255895, y: 0.106134415}
-    normal: {x: -1, y: 0}
-  - position: {x: -0.5056361, y: 0.3005519}
-    normal: {x: -1, y: 0}
-  - position: {x: -0.49655616, y: 0.49845362}
-    normal: {x: -0.813755, y: 0.58120805}
-  - position: {x: -0.35322154, y: 0.5067563}
+    edgeLength: 0.1
+  - position: {x: -0.15, y: -0.5}
+    normal: {x: 0, y: -1}
+    edgeLength: 0.1
+  - position: {x: -0.049999982, y: -0.5}
+    normal: {x: 0, y: -1}
+    edgeLength: 0.1
+  - position: {x: 0.050000012, y: -0.5}
+    normal: {x: 0, y: -1}
+    edgeLength: 0.1
+  - position: {x: 0.15000004, y: -0.5}
+    normal: {x: 0, y: -1}
+    edgeLength: 0.1
+  - position: {x: 0.25, y: -0.5}
+    normal: {x: 0, y: -1}
+    edgeLength: 0.1
+  - position: {x: 0.35000002, y: -0.5}
+    normal: {x: 0, y: -1}
+    edgeLength: 0.1
+  - position: {x: 0.45, y: -0.5}
+    normal: {x: 0, y: -1}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: -0.5}
+    normal: {x: 0.70710677, y: -0.70710677}
+    edgeLength: 0
+  - position: {x: 0.5, y: -0.45}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: -0.35}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: -0.25}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: -0.15}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: -0.049999982}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: 0.050000012}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: 0.15000004}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: 0.25}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: 0.35000002}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: 0.45}
+    normal: {x: 1, y: -0}
+    edgeLength: 0.1
+  - position: {x: 0.5, y: 0.5}
+    normal: {x: 0.70710677, y: 0.70710677}
+    edgeLength: 0
+  - position: {x: 0.45, y: 0.5}
     normal: {x: 0, y: 1}
-  - position: {x: -0.15638506, y: 0.5037041}
+    edgeLength: 0.1
+  - position: {x: 0.35, y: 0.5}
     normal: {x: 0, y: 1}
-  - position: {x: 0.07675207, y: 0.5011668}
+    edgeLength: 0.1
+  - position: {x: 0.25, y: 0.5}
     normal: {x: 0, y: 1}
-  - position: {x: 0.3096521, y: 0.49546337}
+    edgeLength: 0.1
+  - position: {x: 0.15, y: 0.5}
     normal: {x: 0, y: 1}
-  - position: {x: 0.50044906, y: 0.50461006}
-    normal: {x: 0.8240772, y: 0.56647754}
-  - position: {x: 0.5064651, y: 0.29567337}
-    normal: {x: 1, y: 0}
-  - position: {x: 0.50929415, y: 0.093007565}
-    normal: {x: 1, y: 0}
-  - position: {x: 0.5025617, y: -0.103260994}
-    normal: {x: 1, y: 0}
-  - position: {x: 0.50217664, y: -0.31805468}
-    normal: {x: 1, y: 0}
+    edgeLength: 0.1
+  - position: {x: 0.049999982, y: 0.5}
+    normal: {x: 0, y: 1}
+    edgeLength: 0.1
+  - position: {x: -0.050000012, y: 0.5}
+    normal: {x: 0, y: 1}
+    edgeLength: 0.1
+  - position: {x: -0.15000004, y: 0.5}
+    normal: {x: 0, y: 1}
+    edgeLength: 0.1
+  - position: {x: -0.25, y: 0.5}
+    normal: {x: 0, y: 1}
+    edgeLength: 0.1
+  - position: {x: -0.35000002, y: 0.5}
+    normal: {x: 0, y: 1}
+    edgeLength: 0.1
+  - position: {x: -0.45, y: 0.5}
+    normal: {x: 0, y: 1}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: 0.5}
+    normal: {x: -0.70710677, y: 0.70710677}
+    edgeLength: 0
+  - position: {x: -0.5, y: 0.45}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: 0.35}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: 0.25}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: 0.15}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: 0.049999982}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: -0.050000012}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: -0.15000004}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: -0.25}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: -0.35000002}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  - position: {x: -0.5, y: -0.45}
+    normal: {x: -1, y: -0}
+    edgeLength: 0.1
+  SampleSpacing: 0.1
+  GenerateOnEnable: 1
+--- !u!61 &94077127
+BoxCollider2D:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 94077122}
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Density: 1
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_ForceSendLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_ForceReceiveLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_ContactCaptureLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_CallbackLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_IsTrigger: 0
+  m_UsedByEffector: 0
+  m_CompositeOperation: 0
+  m_CompositeOrder: 0
+  m_Offset: {x: 0, y: 0}
+  m_SpriteTilingProperty:
+    border: {x: 0, y: 0, z: 0, w: 0}
+    pivot: {x: 0.5, y: 0.5}
+    oldSize: {x: 1, y: 1}
+    newSize: {x: 1, y: 1}
+    adaptiveTilingThreshold: 0.5
+    drawMode: 0
+    adaptiveTiling: 0
+  m_AutoTiling: 0
+  m_Size: {x: 1, y: 1}
+  m_EdgeRadius: 0
 --- !u!1 &203844586
 GameObject:
   m_ObjectHideFlags: 0
@@ -424,13 +565,14 @@ GameObject:
   - component: {fileID: 367632488}
   - component: {fileID: 367632487}
   - component: {fileID: 367632489}
+  - component: {fileID: 367632490}
   m_Layer: 0
   m_Name: FluidGPU
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &367632487
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -519,6 +661,22 @@ MonoBehaviour:
     maxVelocity: 1
     minVelocity: 0
     maxPressure: 1
+--- !u!114 &367632490
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 367632486}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 43870975b71a56c459511bafd953dbfc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Rigidbody: {fileID: 94077125}
+  Area: 10
+  ForceScale: 1
+  ImpulseSmoothingTime: 0.08
 --- !u!1 &604712593
 GameObject:
   m_ObjectHideFlags: 0
@@ -949,7 +1107,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &2014640968
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1001,7 +1159,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 605d4fe371862ae4da086394dbdab1ad, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_ParticleCount: 500
+  m_ParticleCount: 2000
   width: 100
   height: 100
   Gravity: 9
@@ -1052,6 +1210,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   Rigidbody: {fileID: 94077125}
   Area: 10
+  ForceScale: 1
+  ImpulseSmoothingTime: 0.08
 --- !u!1 &2116198337
 GameObject:
   m_ObjectHideFlags: 0
