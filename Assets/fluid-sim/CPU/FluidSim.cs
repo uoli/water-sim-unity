@@ -90,6 +90,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public float SmoothingRadius => SmoothingLength;
     float IFluidSim.TargetDensity => RestDensity;
     Transform IFluidSim.Transform => transform;
+    public float LastStepDeltaTime { get; private set; }
 
     // Derived quantities: the spacing comes from how many particles fill the
     // spawn region, and mass follows so that the fill sits exactly at RestDensity.
@@ -255,6 +256,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
 
     void StepSimulation(float stepTime)
     {
+        LastStepDeltaTime = stepTime;
+
         // Fired per substep: the rigid-body coupling registers fresh surface
         // data before the step and retrieves the exchanged impulses after it.
         // Each step overwrites the impulse outputs, so retrieving once per

@@ -417,4 +417,5 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     public void RetrieveRigidBodySurfaceResults(IList<OutputSimulationSurfacePoints> points) { }
     public ComputeBuffer InputExternalPoints => null;
     Transform IFluidSim.Transform => transform;
+    public float LastStepDeltaTime => EffectiveDeltaTime;
 }

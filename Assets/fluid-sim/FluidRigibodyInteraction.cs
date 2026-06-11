@@ -26,6 +26,7 @@ public class FluidRigibodyInteraction : MonoBehaviour
     InputSimulationSurfacePoints[] m_SimInput;
     Vector2[] m_AccumulatedImpulses;
     Vector2[] m_SmoothedForces;
+    float m_AccumulatedSimTime;
     float[] m_PseudoMasses;
     Vector4 m_PseudoMassCacheKey = new Vector4(float.NaN, 0, 0, 0);
 
@@ -229,6 +230,7 @@ public class FluidRigibodyInteraction : MonoBehaviour
             }
             m_AccumulatedImpulses[index] += impulse;
         }
+        m_AccumulatedSimTime += m_FluidSim.LastStepDeltaTime;
     }
 
     void FixedUpdate()
@@ -237,24 +239,33 @@ public class FluidRigibodyInteraction : MonoBehaviour
         var points = m_SurfaceSampler.SurfacePoints;
         var count = Mathf.Min(m_AccumulatedImpulses.Length, points.Count);
 
-        var fixedDt = Time.fixedDeltaTime;
+        // A physics step with no sim substeps since the last one carries no
+        // information about the fluid force — it does NOT mean the force is
+        // zero. Updating the average with a zero rate on those steps sags the
+        // support by alpha each time (a ~10Hz droop train at typical settings,
+        // felt as jumpiness); instead, hold the previous estimate and keep
+        // applying it.
+        var hasNewData = m_AccumulatedSimTime > 0f;
+
         // 1 - exp(-dt/tau): exponential moving average with a framerate-
         // independent time constant, evaluated at the fixed-step cadence.
         // Smoothed per point so the torque distribution over the hull is
         // preserved.
         var alpha = ImpulseSmoothingTime > 0f
-            ? 1f - Mathf.Exp(-fixedDt / ImpulseSmoothingTime)
+            ? 1f - Mathf.Exp(-Time.fixedDeltaTime / ImpulseSmoothingTime)
             : 1f;
 
         for (var index = 0; index < count; index++)
         {
-            // Momentum accumulated since the last physics step, expressed as a
-            // force rate. The smoothed rate persists across physics steps that
-            // received no sim impulses, bridging the gaps that caused the
-            // jumpiness.
-            var forceRate = m_AccumulatedImpulses[index] / fixedDt;
-            m_AccumulatedImpulses[index] = Vector2.zero;
-            m_SmoothedForces[index] = Vector2.Lerp(m_SmoothedForces[index], forceRate, alpha);
+            if (hasNewData)
+            {
+                // Accumulated momentum divided by the sim time it was exchanged
+                // over: a force rate that is independent of how many substeps
+                // happened to land between physics steps.
+                var forceRate = m_AccumulatedImpulses[index] / m_AccumulatedSimTime;
+                m_AccumulatedImpulses[index] = Vector2.zero;
+                m_SmoothedForces[index] = Vector2.Lerp(m_SmoothedForces[index], forceRate, alpha);
+            }
             if (m_SmoothedForces[index] == Vector2.zero) continue;
 
             // The sampled point is in the body's local space; the force must be
@@ -263,6 +274,9 @@ public class FluidRigibodyInteraction : MonoBehaviour
             var worldForce = SimToWorldVector(m_SmoothedForces[index]) * ForceScale;
             Rigidbody.AddForceAtPosition(worldForce, worldPoint, ForceMode2D.Force);
         }
+
+        if (hasNewData)
+            m_AccumulatedSimTime = 0f;
     }
 
 }

@@ -54,4 +54,7 @@ public interface IFluidSim
     ComputeBuffer InputExternalPoints { get; }
     
     Transform Transform { get; }
+    // Duration of the most recent simulation substep, so impulse consumers can
+    // convert accumulated momentum into a force rate over actual sim time.
+    float LastStepDeltaTime { get; }
 }
