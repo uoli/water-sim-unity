@@ -224,7 +224,7 @@ Rigidbody2D:
   m_Simulated: 0
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 0.0002
+  m_Mass: 11.5
   m_LinearDamping: 5
   m_AngularDamping: 5
   m_GravityScale: 1
@@ -444,20 +444,22 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   SimComputeShader: {fileID: 7200000, guid: 47a5eccea77b2bf4ca77adc4d12d562f, type: 3}
-  SortComputeShader: {fileID: 7200000, guid: cae7e393630646ab95afb5834be1888b, type: 3}
-  ParticleCount: 20000
+  ParticleCount: 10000
   Width: 100
   Height: 100
-  Mass: 1
-  SmoothingRadius: 1.44
-  TargetDensity: 2
-  PressureMultiplier: 2290
-  SubSteps: 2
-  DeltaTime: 0.015
+  RestDensity: 1
+  SmoothingRadiusInSpacings: 2
+  PressureMultiplier: 60000
+  MaxStepsPerFrame: 20
+  AutoDeltaTime: 1
+  DeltaTime: 0.001
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
-  ExternalForceStrength: 500
-  Gravity: 9.8
+  ExternalForceStrength: 2000
+  Gravity: 40
+  ViscosityFactor: 0.5
+  PlacementMode: 0
+  FillFraction: 0.6
 --- !u!224 &367632488
 RectTransform:
   m_ObjectHideFlags: 0
@@ -494,6 +496,7 @@ MonoBehaviour:
   m_CircleTexture: {fileID: 2800000, guid: 810fda614b13807479b5eae6ca3a5273, type: 3}
   m_FluidMaterialDebugShader: {fileID: 4800000, guid: bea36adff31bbfd4fb4c9ee3ec899281, type: 3}
   m_PointInstancedShader: {fileID: 4800000, guid: fcfb3d4be45b3da4da15d3c3c11f6d24, type: 3}
+  m_StatsComputeShader: {fileID: 7200000, guid: 8c1f3a59d27e46b1a90f5c4d83e2b7a6, type: 3}
   m_FluidMeshRenderer: {fileID: 1280098595}
   m_UseDynamicRanges: 1
   m_CircleSize: 0.5
@@ -963,6 +966,7 @@ MonoBehaviour:
   m_CircleTexture: {fileID: 2800000, guid: 810fda614b13807479b5eae6ca3a5273, type: 3}
   m_FluidMaterialDebugShader: {fileID: 4800000, guid: bea36adff31bbfd4fb4c9ee3ec899281, type: 3}
   m_PointInstancedShader: {fileID: 4800000, guid: fcfb3d4be45b3da4da15d3c3c11f6d24, type: 3}
+  m_StatsComputeShader: {fileID: 7200000, guid: 8c1f3a59d27e46b1a90f5c4d83e2b7a6, type: 3}
   m_FluidMeshRenderer: {fileID: 1963848823}
   m_UseDynamicRanges: 1
   m_CircleSize: 1
@@ -1001,17 +1005,19 @@ MonoBehaviour:
   width: 100
   height: 100
   Gravity: 9
-  Mass: 1
-  SmoothingLength: 7.1
-  m_PressureMultiplier: 5051.1
+  RestDensity: 1
+  SmoothingRadiusInSpacings: 2
+  m_PressureMultiplier: 10000
   UseAdaptativeStepTime: 1
   SimulationStep: 0.02
   BoundaryPushStrength: 0
   CollisionDamping: 0.5
   AutoStep: 1
+  MaxStepsPerFrame: 8
   ViscosityFactor: 0.5
   m_InteractionStrength: 100
-  m_TargetDensity: 0.18
+  PlacementMode: 0
+  FillFraction: 0.6
 --- !u!224 &2014640970
 RectTransform:
   m_ObjectHideFlags: 0
