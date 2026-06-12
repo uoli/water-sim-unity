@@ -54,6 +54,12 @@ public interface IFluidSim
     event Action PreSimulation;
     event Action PostSimulation;
     void SetRigidBodySurfaceResults(IList<InputSimulationSurfacePoints> points);
+    // How strongly the sampled surface impulses are applied back onto the
+    // fluid (0..1). 1 for sampled-impulse coupling (exact pairwise momentum);
+    // 0 for analytic coupling, where the boundary-density barrier alone
+    // couples the fluid and a reaction on top double-pushes the hull region
+    // into a gap/contact relaxation oscillation.
+    void SetRigidBodyReactionScale(float scale);
     void RetrieveRigidBodySurfaceResults(IList<OutputSimulationSurfacePoints> points);
     ComputeBuffer InputExternalPoints { get; }
     

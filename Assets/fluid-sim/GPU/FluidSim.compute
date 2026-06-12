@@ -82,6 +82,7 @@ int NumBlocks;
 int CellTableSize; // power of two
 int SurfacePointCount;
 float ContactDistance;
+float ReactionScale;
 float Width;
 float Height;
 float Mass;
@@ -625,7 +626,7 @@ void ComputeForces(uint3 id : SV_DispatchThreadID)
         + viscosityForce * ViscosityFactor / density
         + gravityAcceleration
         + interactionAcceleration;
-    VelocityDelta[i] = acceleration * DeltaTime + reactionVelocityChange;
+    VelocityDelta[i] = acceleration * DeltaTime + reactionVelocityChange * ReactionScale;
 }
 
 [numthreads(64,1,1)]

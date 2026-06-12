@@ -428,6 +428,7 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         SimComputeShader.SetFloat("ViscosityFactor", ViscosityFactor);
         SimComputeShader.SetInt("SurfacePointCount", m_SurfacePointCount);
         SimComputeShader.SetFloat("ContactDistance", SmoothingRadius * 0.25f);
+        SimComputeShader.SetFloat("ReactionScale", m_RigidBodyReactionScale);
 
         // Fixed-timestep accumulator: take deltaTime-sized substeps to cover the
         // elapsed wall-clock time, so simulation speed is independent of framerate.
@@ -573,4 +574,6 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     Transform IFluidSim.Transform => transform;
     float IFluidSim.Gravity => Gravity;
     public float LastStepDeltaTime => m_LastCoveredSimTime;
+    float m_RigidBodyReactionScale = 1f;
+    public void SetRigidBodyReactionScale(float scale) { m_RigidBodyReactionScale = scale; }
 }

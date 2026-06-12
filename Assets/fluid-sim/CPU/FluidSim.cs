@@ -92,6 +92,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
     Transform IFluidSim.Transform => transform;
     float IFluidSim.Gravity => Gravity;
     public float LastStepDeltaTime { get; private set; }
+    float m_RigidBodyReactionScale = 1f;
+    public void SetRigidBodyReactionScale(float scale) { m_RigidBodyReactionScale = scale; }
 
     // Derived quantities: the spacing comes from how many particles fill the
     // spawn region, and mass follows so that the fill sits exactly at RestDensity.
@@ -336,6 +338,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
         public float precalculatedKernelFactor;
         public float mass;
         public float contactDistance;
+        public float reactionScale;
 
         public float deltaTime;
         public float gravity;
@@ -359,7 +362,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
 
             // The reaction is an impulse-derived velocity change, not a force:
             // it must not be scaled by deltaTime again.
-            var newVelocity = velocity + (Vector2.down * gravity + interactionForce) * deltaTime + reactionVelocityChange;
+            var newVelocity = velocity + (Vector2.down * gravity + interactionForce) * deltaTime + reactionVelocityChange * reactionScale;
             newVelocity = CancelVelocityIntoSurface(position, newVelocity, contactDistance, rigidBodyPoints);
             velocities[index] = newVelocity;
         }
@@ -692,6 +695,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             squaredSmoothingLength = m_SquaredSmoothingLength,
             smoothingLength = SmoothingLength,
             contactDistance = SmoothingLength * 0.25f,
+            reactionScale = m_RigidBodyReactionScale,
             gravity = Gravity,
             deltaTime = deltaTime,
             forceCenter = m_MousePosition,

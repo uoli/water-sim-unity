@@ -186,6 +186,10 @@ public class FluidRigibodyInteraction : MonoBehaviour
         for (var i = 0; i < m_SimInput.Length; i++)
             m_SimInput[i].pseudoMass = m_PseudoMasses[i];
 
+        // Analytic mode couples the fluid through the boundary-density barrier
+        // alone; applying the sampled reaction on top double-pushes the hull
+        // region into a gap/contact relaxation oscillation that never settles.
+        m_FluidSim.SetRigidBodyReactionScale(CouplingMode == FluidCouplingMode.SampledImpulses ? 1f : 0f);
         m_FluidSim.SetRigidBodySurfaceResults(m_SimInput);
     }
 
