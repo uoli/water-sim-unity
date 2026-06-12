@@ -42,12 +42,21 @@ struct SurfacePointInput
 };
 struct SurfacePointOutput
 {
-    float2 impulse;    // this substep's exchanged momentum
-    float weightSum;   // Shepard denominator, for the symmetric reaction
+    float2 impulse;        // this substep's exchanged momentum
+    float weightSum;       // Shepard denominator, for the symmetric reaction
+    float2 fluidVelocity;  // interpolated fluid velocity at the point
+};
+// Per-frame accumulation, read back asynchronously once per frame.
+struct SurfaceAccumData
+{
+    float2 impulse;       // summed across substeps
+    float coverage;       // summed saturate(weightSum); divide by sampleCount
+    float sampleCount;    // substeps accumulated
+    float2 fluidVelocity; // summed; divide by sampleCount
 };
 StructuredBuffer<SurfacePointInput> SurfacePoints;
 RWStructuredBuffer<SurfacePointOutput> SurfaceResults;
-RWStructuredBuffer<float2> SurfaceImpulseAccum; // summed across substeps, read back once per frame
+RWStructuredBuffer<SurfaceAccumData> SurfaceImpulseAccum;
 
 // Read-only aliases (SRVs) of the buffers above. D3D11 caps UAVs at 8 per
 // dispatch and the force/density kernels only read most of their inputs, so
@@ -475,10 +484,11 @@ void ComputeSurfaceForces(uint3 id : SV_DispatchThreadID)
     }
 
     float2 impulse = 0;
+    float2 interpolatedVelocity = 0;
     if (weightSum > 1e-6)
     {
         float interpolatedPressure = pressureSum / weightSum;
-        float2 interpolatedVelocity = velocitySum / weightSum;
+        interpolatedVelocity = velocitySum / weightSum;
         float2 force = -sp.normal * interpolatedPressure
             + (interpolatedVelocity - sp.velocity) * ViscosityFactor;
         impulse = force * sp.areaWeight * DeltaTime;
@@ -487,15 +497,24 @@ void ComputeSurfaceForces(uint3 id : SV_DispatchThreadID)
     SurfacePointOutput output;
     output.impulse = impulse;
     output.weightSum = weightSum;
+    output.fluidVelocity = interpolatedVelocity;
     SurfaceResults[i] = output;
-    SurfaceImpulseAccum[i] += impulse; // owner thread per point: no race
+
+    // Owner thread per point: plain read-modify-write, no race.
+    SurfaceAccumData acc = SurfaceImpulseAccum[i];
+    acc.impulse += impulse;
+    acc.coverage += saturate(weightSum);
+    acc.sampleCount += 1;
+    acc.fluidVelocity += interpolatedVelocity;
+    SurfaceImpulseAccum[i] = acc;
 }
 
 [numthreads(64,1,1)]
 void ClearSurfaceAccumulation(uint3 id : SV_DispatchThreadID)
 {
     if ((int)id.x >= SurfacePointCount) return;
-    SurfaceImpulseAccum[id.x] = 0;
+    SurfaceAccumData zero = (SurfaceAccumData)0;
+    SurfaceImpulseAccum[id.x] = zero;
 }
 
 // Pressure, viscosity, gravity and interaction force in a single neighbor

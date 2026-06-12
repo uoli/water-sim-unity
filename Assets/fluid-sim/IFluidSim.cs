@@ -24,9 +24,13 @@ public struct OutputSimulationSurfacePoints
     // Momentum exchanged with the fluid during the sim step (the surface force
     // already integrated over the step's dt) — apply with ForceMode2D.Impulse.
     public Vector2 impulse;
-    // Shepard weight sum of the interpolation that produced the impulse; the
-    // back-reaction uses it to return each particle its exact share.
+    // Shepard weight sum of the interpolation that produced the impulse. Doubles
+    // as a smooth submersion measure (~0 in air, ~1 fully in fluid): the
+    // analytic coupling uses it as per-point coverage, and the back-reaction
+    // uses it to return each particle its exact share.
     public float weightSum;
+    // Shepard-interpolated fluid velocity at the point (sim units), for drag.
+    public Vector2 fluidVelocity;
 }
 
 
@@ -57,4 +61,6 @@ public interface IFluidSim
     // Duration of the most recent simulation substep, so impulse consumers can
     // convert accumulated momentum into a force rate over actual sim time.
     float LastStepDeltaTime { get; }
+    // Sim-space gravity magnitude, needed by analytic (hydrostatic) coupling.
+    float Gravity { get; }
 }

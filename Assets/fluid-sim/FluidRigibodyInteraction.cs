@@ -3,9 +3,24 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Assertions;
 
+public enum FluidCouplingMode
+{
+    // Body force = analytic hydrostatic buoyancy + drag, computed from smooth
+    // measured quantities (per-point submersion and local flow velocity).
+    // Noiseless by construction and directly tunable; momentum with the fluid
+    // agrees on average rather than per pair.
+    AnalyticBuoyancy,
+    // Body force = the sim's sampled surface impulses. Exact pairwise
+    // Newton's third law, but inherits WCSPH pressure noise.
+    SampledImpulses,
+}
+
 public class FluidRigibodyInteraction : MonoBehaviour
 {
     public Rigidbody2D Rigidbody;
+    public FluidCouplingMode CouplingMode = FluidCouplingMode.AnalyticBuoyancy;
+    // Drag strength against relative flow, used by the analytic mode.
+    public float DragCoefficient = 1f;
     // Sim-space surface length the sample points represent in total (2D
     // "area" is a perimeter); each point gets an equal share.
     public float Area;
@@ -26,6 +41,11 @@ public class FluidRigibodyInteraction : MonoBehaviour
     InputSimulationSurfacePoints[] m_SimInput;
     Vector2[] m_AccumulatedImpulses;
     Vector2[] m_SmoothedForces;
+    float[] m_LatestCoverage;
+    Vector2[] m_LatestFluidVelocity;
+    float[] m_SmoothedCoverage;
+    Vector2[] m_SmoothedFluidVelocity;
+    bool m_HasFreshSample;
     float m_AccumulatedSimTime;
     float[] m_PseudoMasses;
     Vector4 m_PseudoMassCacheKey = new Vector4(float.NaN, 0, 0, 0);
@@ -70,6 +90,15 @@ public class FluidRigibodyInteraction : MonoBehaviour
         return new Vector2(
             local.x * m_FluidSim.Width / rect.width,
             local.y * m_FluidSim.Height / rect.height);
+    }
+
+    Vector2 SimToWorldPoint(Vector2 simPoint)
+    {
+        var rect = m_SimRect.rect;
+        var local = new Vector2(
+            simPoint.x / m_FluidSim.Width * rect.width + rect.xMin,
+            simPoint.y / m_FluidSim.Height * rect.height + rect.yMin);
+        return m_FluidSim.Transform.TransformPoint(local);
     }
 
     Vector2 SimToWorldVector(Vector2 simVector)
@@ -210,6 +239,10 @@ public class FluidRigibodyInteraction : MonoBehaviour
         {
             m_AccumulatedImpulses = new Vector2[m_SimResults.Length];
             m_SmoothedForces = new Vector2[m_SimResults.Length];
+            m_LatestCoverage = new float[m_SimResults.Length];
+            m_LatestFluidVelocity = new Vector2[m_SimResults.Length];
+            m_SmoothedCoverage = new float[m_SimResults.Length];
+            m_SmoothedFluidVelocity = new Vector2[m_SimResults.Length];
         }
 
         // Only accumulate here. The sim's substeps fire irregularly relative
@@ -229,13 +262,97 @@ public class FluidRigibodyInteraction : MonoBehaviour
                 continue;
             }
             m_AccumulatedImpulses[index] += impulse;
+
+            // Measured states for the analytic mode: per-point submersion
+            // (the Shepard weight sum, a smooth 0..1 ramp) and local flow.
+            var coverage = m_SimResults[index].weightSum;
+            var fluidVelocity = m_SimResults[index].fluidVelocity;
+            if (float.IsFinite(coverage) && float.IsFinite(fluidVelocity.x) && float.IsFinite(fluidVelocity.y))
+            {
+                m_LatestCoverage[index] = Mathf.Clamp01(coverage);
+                m_LatestFluidVelocity[index] = fluidVelocity;
+            }
         }
+        m_HasFreshSample = true;
         m_AccumulatedSimTime += m_FluidSim.LastStepDeltaTime;
     }
 
     void FixedUpdate()
     {
         if (m_AccumulatedImpulses == null) return;
+        if (CouplingMode == FluidCouplingMode.AnalyticBuoyancy)
+            ApplyAnalyticForces();
+        else
+            ApplySampledImpulses();
+    }
+
+    // Body force from smooth measurements instead of sampled impulses: the
+    // fluid only MEASURES per-point submersion and local flow velocity (both
+    // Shepard interpolations, smooth by construction); the forces are the
+    // textbook formulas. Buoyancy via the divergence theorem over the hull:
+    //   A_submerged = sum cov_i * x_i * n.x_i * ds_i
+    // — the waterline chord that closes the submerged region's boundary has a
+    // vertical normal (n.x = 0) and contributes nothing, so the sum is exact
+    // Archimedes in the sampling limit. The centroid uses the matching flux
+    // forms; drag opposes relative flow per point. The fluid still receives
+    // the sim's sampled reaction, so momentum agrees on average, not per pair.
+    void ApplyAnalyticForces()
+    {
+        if (m_SimInput == null || m_SmoothedCoverage == null) return;
+        var count = Mathf.Min(m_SimInput.Length, m_SmoothedCoverage.Length);
+
+        var alpha = ImpulseSmoothingTime > 0f
+            ? 1f - Mathf.Exp(-Time.fixedDeltaTime / ImpulseSmoothingTime)
+            : 1f;
+        if (m_HasFreshSample)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                m_SmoothedCoverage[i] = Mathf.Lerp(m_SmoothedCoverage[i], m_LatestCoverage[i], alpha);
+                m_SmoothedFluidVelocity[i] = Vector2.Lerp(m_SmoothedFluidVelocity[i], m_LatestFluidVelocity[i], alpha);
+            }
+            m_HasFreshSample = false;
+        }
+
+        // Body-centered coordinates keep the flux sums numerically tame.
+        var center = WorldToSimPoint(Rigidbody.worldCenterOfMass);
+        var area = 0f;
+        var momentX = 0f;
+        var momentY = 0f;
+        for (var i = 0; i < count; i++)
+        {
+            var sp = m_SimInput[i];
+            var x = sp.SimSpacePoint.x - center.x;
+            var y = sp.SimSpacePoint.y - center.y;
+            var flux = m_SmoothedCoverage[i] * sp.normal.x * sp.areaWeight;
+            area += x * flux;
+            momentX += 0.5f * x * x * flux;
+            momentY += x * y * flux;
+        }
+
+        if (area > 1e-4f)
+        {
+            var buoyancySim = new Vector2(0f, m_FluidSim.TargetDensity * m_FluidSim.Gravity * area);
+            var centroidSim = center + new Vector2(momentX / area, momentY / area);
+            var worldForce = SimToWorldVector(buoyancySim) * ForceScale;
+            Rigidbody.AddForceAtPosition(worldForce, SimToWorldPoint(centroidSim), ForceMode2D.Force);
+        }
+
+        var points = m_SurfaceSampler.SurfacePoints;
+        var pointCount = Mathf.Min(count, points.Count);
+        for (var i = 0; i < pointCount; i++)
+        {
+            var coverage = m_SmoothedCoverage[i];
+            if (coverage <= 1e-4f) continue;
+            var sp = m_SimInput[i];
+            var dragSim = (m_SmoothedFluidVelocity[i] - sp.velocity) * (DragCoefficient * coverage * sp.areaWeight);
+            var worldPoint = (Vector2)Rigidbody.transform.TransformPoint(points[i].position);
+            Rigidbody.AddForceAtPosition(SimToWorldVector(dragSim) * ForceScale, worldPoint, ForceMode2D.Force);
+        }
+    }
+
+    void ApplySampledImpulses()
+    {
         var points = m_SurfaceSampler.SurfacePoints;
         var count = Mathf.Min(m_AccumulatedImpulses.Length, points.Count);
 

@@ -90,6 +90,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
     public float SmoothingRadius => SmoothingLength;
     float IFluidSim.TargetDensity => RestDensity;
     Transform IFluidSim.Transform => transform;
+    float IFluidSim.Gravity => Gravity;
     public float LastStepDeltaTime { get; private set; }
 
     // Derived quantities: the spacing comes from how many particles fill the
@@ -594,7 +595,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
             var fluidForce = CalculateFluidForceAtSurfacePoint(
                 surfacePoint.SimSpacePoint, surfacePoint.normal, surfacePoint.velocity, lookupHelper,
                 mass, squaredSmoothingLength, smoothingLength, precalculatedKernelFactor, viscosityCoefficient,
-                positions, pressures, densities, velocities, out var weightSum);
+                positions, pressures, densities, velocities, out var weightSum, out var interpolatedVelocity);
             // Integrating the force over this step's dt up front makes the
             // output an impulse: the consumer no longer needs to know (or
             // guess) which timestep the simulation used.
@@ -602,7 +603,8 @@ public class FluidSim : MonoBehaviour, IFluidSim
             outputSurfacePoints[index] = new OutputSimulationSurfacePoints
             {
                 impulse = impulse,
-                weightSum = weightSum
+                weightSum = weightSum,
+                fluidVelocity = interpolatedVelocity
             };
         }
     }
@@ -886,8 +888,9 @@ public class FluidSim : MonoBehaviour, IFluidSim
         GridSpatialLookup lookup, float mass,
         float squaredSmoothingLength, float smoothingLength, float kernelFactor, float dragCoefficient,
         ReadOnlySpan<Vector2> positions, ReadOnlySpan<float> pressure, ReadOnlySpan<float> density, ReadOnlySpan<Vector2> velocities,
-        out float weightSum)
+        out float weightSum, out Vector2 interpolatedVelocity)
     {
+        interpolatedVelocity = Vector2.zero;
         var particleIndices = new NativeList<int>(positions.Length, Allocator.Temp);
         lookup.GetParticlesAround(position, particleIndices);
         weightSum = 0f;
@@ -911,7 +914,7 @@ public class FluidSim : MonoBehaviour, IFluidSim
         if (weightSum <= 1e-6f) return Vector2.zero;
 
         var interpolatedPressure = pressureSum / weightSum;
-        var interpolatedVelocity = velocitySum / weightSum;
+        interpolatedVelocity = velocitySum / weightSum;
         var pressureForce = -normal * interpolatedPressure;
         var dragForce = (interpolatedVelocity - surfaceVelocity) * dragCoefficient;
         return pressureForce + dragForce;

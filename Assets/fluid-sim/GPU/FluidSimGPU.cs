@@ -67,8 +67,20 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     ComputeBuffer m_SurfacePointsBuffer;
     ComputeBuffer m_SurfaceResultsBuffer;
     ComputeBuffer m_SurfaceAccumBuffer;
+    // Mirrors SurfaceAccumData in FluidSim.compute.
+    [StructLayout(LayoutKind.Sequential)]
+    struct SurfaceAccumData
+    {
+        public Vector2 impulse;
+        public float coverage;
+        public float sampleCount;
+        public Vector2 fluidVelocity;
+    }
+
     InputSimulationSurfacePoints[] m_SurfacePointData;
     Vector2[] m_RetrievedImpulses;
+    float[] m_RetrievedCoverage;
+    Vector2[] m_RetrievedFluidVelocity;
     readonly Queue<(UnityEngine.Rendering.AsyncGPUReadbackRequest request, float simTime)> m_PendingSurfaceReadbacks = new();
     int m_SurfacePointCount;
     float m_LastCoveredSimTime;
@@ -302,9 +314,9 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         m_SurfacePointsBuffer.name = "SurfacePointsBuffer";
         m_SurfaceResultsBuffer = new ComputeBuffer(count, Marshal.SizeOf(typeof(OutputSimulationSurfacePoints)));
         m_SurfaceResultsBuffer.name = "SurfaceResultsBuffer";
-        m_SurfaceAccumBuffer = new ComputeBuffer(count, Marshal.SizeOf(typeof(Vector2)));
+        m_SurfaceAccumBuffer = new ComputeBuffer(count, Marshal.SizeOf(typeof(SurfaceAccumData)));
         m_SurfaceAccumBuffer.name = "SurfaceImpulseAccumBuffer";
-        m_SurfaceAccumBuffer.SetData(new Vector2[count]);
+        m_SurfaceAccumBuffer.SetData(new SurfaceAccumData[count]);
     }
 
     void BindSurfaceBuffers()
@@ -507,6 +519,8 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         {
             m_SurfacePointData = new InputSimulationSurfacePoints[m_SurfacePointCount];
             m_RetrievedImpulses = new Vector2[m_SurfacePointCount];
+            m_RetrievedCoverage = new float[m_SurfacePointCount];
+            m_RetrievedFluidVelocity = new Vector2[m_SurfacePointCount];
             CreateSurfaceBuffers(m_SurfacePointCount);
             BindSurfaceBuffers();
         }
@@ -521,7 +535,12 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         var count = Mathf.Min(m_RetrievedImpulses.Length, points.Count);
         for (var i = 0; i < count; i++)
         {
-            points[i] = new OutputSimulationSurfacePoints { impulse = m_RetrievedImpulses[i], weightSum = 1f };
+            points[i] = new OutputSimulationSurfacePoints
+            {
+                impulse = m_RetrievedImpulses[i],
+                weightSum = m_RetrievedCoverage[i],
+                fluidVelocity = m_RetrievedFluidVelocity[i]
+            };
         }
     }
 
@@ -531,10 +550,16 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
         {
             var (request, simTime) = m_PendingSurfaceReadbacks.Dequeue();
             if (request.hasError) continue;
-            var data = request.GetData<Vector2>();
+            var data = request.GetData<SurfaceAccumData>();
             var count = Mathf.Min(data.Length, m_RetrievedImpulses?.Length ?? 0);
             for (var i = 0; i < count; i++)
-                m_RetrievedImpulses[i] = data[i];
+            {
+                var acc = data[i];
+                var samples = Mathf.Max(1f, acc.sampleCount);
+                m_RetrievedImpulses[i] = acc.impulse;
+                m_RetrievedCoverage[i] = acc.coverage / samples;
+                m_RetrievedFluidVelocity[i] = acc.fluidVelocity / samples;
+            }
             m_LastCoveredSimTime = simTime;
             PostSimulation?.Invoke();
         }
@@ -542,5 +567,6 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
 
     public ComputeBuffer InputExternalPoints => m_SurfacePointCount > 0 ? m_SurfacePointsBuffer : null;
     Transform IFluidSim.Transform => transform;
+    float IFluidSim.Gravity => Gravity;
     public float LastStepDeltaTime => m_LastCoveredSimTime;
 }
