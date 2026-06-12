@@ -21,6 +21,12 @@ public class FluidRigibodyInteraction : MonoBehaviour
     public FluidCouplingMode CouplingMode = FluidCouplingMode.AnalyticBuoyancy;
     // Drag strength against relative flow, used by the analytic mode.
     public float DragCoefficient = 1f;
+    // Scales the boundary pseudo-mass. At 1 a particle pressed against the
+    // hull reads up to ~2x rest density, making contact pressure ~rho0*k —
+    // far stiffer than hydrostatics and prone to ejection chatter. Lower
+    // values make the hull a softer (deeper-engaging) barrier.
+    [Range(0.1f, 1f)]
+    public float BoundaryDensityFactor = 0.5f;
     // Sim-space surface length the sample points represent in total (2D
     // "area" is a perimeter); each point gets an equal share.
     public float Area;
@@ -47,6 +53,7 @@ public class FluidRigibodyInteraction : MonoBehaviour
     Vector2[] m_SmoothedFluidVelocity;
     bool m_HasFreshSample;
     float m_AccumulatedSimTime;
+    float m_LastBoundaryDensityFactor;
     float[] m_PseudoMasses;
     Vector4 m_PseudoMassCacheKey = new Vector4(float.NaN, 0, 0, 0);
 
@@ -200,8 +207,10 @@ public class FluidRigibodyInteraction : MonoBehaviour
             scaleX * Rigidbody.transform.lossyScale.x,
             scaleY * Rigidbody.transform.lossyScale.y,
             anisotropic ? Rigidbody.rotation : 0f);
-        if (m_PseudoMasses != null && m_PseudoMasses.Length == m_SimInput.Length && key == m_PseudoMassCacheKey) return;
+        if (m_PseudoMasses != null && m_PseudoMasses.Length == m_SimInput.Length && key == m_PseudoMassCacheKey
+            && Mathf.Approximately(BoundaryDensityFactor, m_LastBoundaryDensityFactor)) return;
         m_PseudoMassCacheKey = key;
+        m_LastBoundaryDensityFactor = BoundaryDensityFactor;
 
         // Self-calibrating boundary pseudo-mass (Akinci et al. 2012):
         // psi_b = rho0 / sum_k W(|x_b - x_k|), summed over the boundary
@@ -226,7 +235,7 @@ public class FluidRigibodyInteraction : MonoBehaviour
                 crowding += SmoothingKernels.SmoothingKernel2(Mathf.Sqrt(sqrDst), radius, kernelFactor);
             }
             // crowding >= W(0) because the sample counts itself; never zero.
-            m_PseudoMasses[i] = m_FluidSim.TargetDensity / crowding;
+            m_PseudoMasses[i] = BoundaryDensityFactor * m_FluidSim.TargetDensity / crowding;
         }
     }
     

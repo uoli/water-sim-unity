@@ -727,7 +727,9 @@ public class FluidSim : MonoBehaviour, IFluidSim
 
     float CalcCFLTimeStep(float maxVelocity)
     {
-        const float courantNumber = 0.3f;
+        // Coupled hulls roughly double the local pressure stiffness (boundary
+        // density plus reaction); stable dt scales with 1/sqrt(stiffness).
+        var courantNumber = m_ExternalPoints.IsCreated && m_ExternalPoints.Length > 0 ? 0.21f : 0.3f;
         // For the linear EOS p = k * (density - rest), the speed of sound is sqrt(k).
         var speedOfSound = Mathf.Sqrt(Mathf.Max(1e-6f, m_PressureMultiplier));
         return courantNumber * SmoothingLength / (speedOfSound + maxVelocity);

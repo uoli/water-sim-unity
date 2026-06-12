@@ -137,7 +137,11 @@ public class FluidSimGPU : MonoBehaviour, IFluidSim
     // data back, so the actual max velocity is not available.
     float CalcCFLDeltaTime()
     {
-        const float courantNumber = 0.3f;
+        // The rigid-body coupling roughly doubles the effective pressure
+        // stiffness for particles at the hull (boundary density plus the
+        // reaction force), and stable dt scales with 1/sqrt(stiffness): use
+        // the tighter Courant number whenever a body is registered.
+        var courantNumber = m_SurfacePointCount > 0 ? 0.21f : 0.3f;
         var speedOfSound = Mathf.Sqrt(Mathf.Max(1e-6f, PressureMultiplier));
         var freeFallSpeed = Mathf.Sqrt(2f * Mathf.Abs(Gravity) * Height);
         return courantNumber * SmoothingRadius / (speedOfSound + freeFallSpeed);
